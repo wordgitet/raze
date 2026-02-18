@@ -1,0 +1,195 @@
+#include <stdlib.h>
+#include <stdio.h>
+#include <string.h>
+
+#include "raze/raze.h"
+
+static void print_usage(const char *prog) {
+    printf("Raze V1 (RAR5 store-only extractor)\n");
+    printf("Usage: %s x [switches] <archive.rar> [path_to_extract/]\n", prog);
+    printf("       %s l[t] <archive.rar>\n", prog);
+    printf("       %s --help\n", prog);
+    printf("\nSupported switches:\n");
+    printf("  -op<path>   set output path\n");
+    printf("  -o[+|-]     set overwrite mode (+ always, - never)\n");
+    printf("  -y          assume yes on all queries (same as -o+)\n");
+    printf("  -idq        quiet messages\n");
+    printf("  -inul       disable all messages\n");
+    printf("\nCommands: x (extract), l (list), lt (technical list)\n");
+}
+
+static int status_to_exit_code(RazeStatus status) {
+    switch (status) {
+        case RAZE_STATUS_OK:
+            return 0;
+        case RAZE_STATUS_BAD_ARGUMENT:
+            return 2;
+        case RAZE_STATUS_UNSUPPORTED:
+        case RAZE_STATUS_UNSUPPORTED_FEATURE:
+            return 3;
+        case RAZE_STATUS_BAD_ARCHIVE:
+            return 4;
+        case RAZE_STATUS_PATH_VIOLATION:
+            return 5;
+        case RAZE_STATUS_CRC_MISMATCH:
+            return 6;
+        case RAZE_STATUS_EXISTS:
+            return 7;
+        case RAZE_STATUS_IO:
+            return 8;
+        case RAZE_STATUS_ABORTED:
+            return 130;
+        default:
+            return 1;
+    }
+}
+
+static int parse_switch(
+    int argc,
+    char **argv,
+    int *index,
+    RazeExtractOptions *options,
+    const char **output_dir
+) {
+    const char *arg = argv[*index];
+
+    if (strcmp(arg, "--overwrite") == 0 || strcmp(arg, "-y") == 0 || strcmp(arg, "-o+") == 0) {
+        options->overwrite_mode = RAZE_OVERWRITE_ALWAYS;
+        return 1;
+    }
+
+    if (strcmp(arg, "--quiet") == 0 || strcmp(arg, "-inul") == 0 ||
+        (strncmp(arg, "-id", 3) == 0 && strstr(arg, "q") != 0)) {
+        options->quiet = 1;
+        return 1;
+    }
+
+    if (strcmp(arg, "--verbose") == 0) {
+        options->verbose = 1;
+        return 1;
+    }
+
+    if (strcmp(arg, "-o-") == 0) {
+        options->overwrite_mode = RAZE_OVERWRITE_NEVER;
+        return 1;
+    }
+
+    if (strncmp(arg, "-op", 3) == 0) {
+        if (arg[3] != '\0') {
+            *output_dir = arg + 3;
+            return 1;
+        }
+        if (*index + 1 >= argc) {
+            return 0;
+        }
+        *index += 1;
+        *output_dir = argv[*index];
+        return 1;
+    }
+
+    return 0;
+}
+
+int main(int argc, char **argv) {
+    RazeDecoder decoder;
+    RazeExtractOptions options;
+    RazeStatus status;
+    const char *command = 0;
+    const char *archive = 0;
+    const char *output_dir = ".";
+    int i;
+    int scan_switches = 1;
+    int have_explicit_output = 0;
+    int is_extract = 0;
+    int is_list = 0;
+    int list_technical = 0;
+
+    if (argc == 2 && strcmp(argv[1], "--help") == 0) {
+        print_usage(argv[0]);
+        return 0;
+    }
+
+    if (argc < 3) {
+        print_usage(argv[0]);
+        return 2;
+    }
+
+    command = argv[1];
+    if (strcmp(command, "x") == 0) {
+        is_extract = 1;
+    } else if (strcmp(command, "l") == 0) {
+        is_list = 1;
+    } else if (strcmp(command, "lt") == 0) {
+        is_list = 1;
+        list_technical = 1;
+    } else {
+        fprintf(stderr, "raze: unsupported command: %s\n", command);
+        return 2;
+    }
+
+    options = raze_extract_options_default();
+
+    for (i = 2; i < argc; ++i) {
+        const char *arg = argv[i];
+        if (scan_switches && strcmp(arg, "-") == 0) {
+            scan_switches = 0;
+            continue;
+        }
+
+        if (scan_switches && arg[0] == '-' && arg[1] != '\0') {
+            if (!parse_switch(argc, argv, &i, &options, &output_dir)) {
+                fprintf(stderr, "raze: unsupported or invalid switch: %s\n", arg);
+                return 2;
+            }
+            if (is_list && strncmp(arg, "-op", 3) == 0) {
+                fprintf(stderr, "raze: -op is only valid for extract command\n");
+                return 2;
+            }
+            have_explicit_output = have_explicit_output || strncmp(arg, "-op", 3) == 0;
+            continue;
+        }
+
+        if (archive == 0) {
+            archive = arg;
+            continue;
+        }
+
+        if (is_extract && !have_explicit_output) {
+            output_dir = arg;
+            have_explicit_output = 1;
+            continue;
+        }
+
+        fprintf(stderr, "raze: too many positional arguments\n");
+        return 2;
+    }
+
+    if (archive == 0) {
+        fprintf(stderr, "raze: missing archive path\n");
+        return 2;
+    }
+
+    status = raze_decoder_init(&decoder);
+    if (status != RAZE_STATUS_OK) {
+        fprintf(stderr, "raze: decoder initialization failed\n");
+        return 1;
+    }
+
+    if (is_extract) {
+        status = raze_decode_archive_with_options(&decoder, archive, output_dir, &options);
+    } else {
+        status = raze_list_archive(&decoder, archive, list_technical);
+    }
+    if (status != RAZE_STATUS_OK) {
+        if (!options.quiet) {
+            fprintf(stderr, "raze: %s\n", raze_status_string(status));
+        }
+        return status_to_exit_code(status);
+    }
+
+    if (is_extract && options.verbose && !options.quiet) {
+        printf("raze: extract complete\n");
+    }
+
+    return 0;
+}

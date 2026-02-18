@@ -1,0 +1,10 @@
+build/
+raze
+
+corpus/downloads/
+corpus/upstream/
+corpus/local/
+
+bench/results/
+
+third_party/isa-l/bin/
