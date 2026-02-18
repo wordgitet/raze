@@ -53,7 +53,10 @@ Bench scripts pin UnRAR to single-thread by default for fair comparison with
 current `raze` decode path:
 
 - Default: `UNRAR_THREADS=1`
+- Default: `RUNS=7`
 - Override example: `UNRAR_THREADS=8 make bench-compressed`
+- Override example: `RUNS=11 make bench-solid`
+- Compressed and solid benches perform one warmup run and report `p50`/`p90`.
 
 ## Corpus Workflow
 

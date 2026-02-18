@@ -401,14 +401,39 @@ static int history_get_byte(
 
 static void copy_from_output_with_overlap(unsigned char *dst, size_t length, size_t distance)
 {
+	unsigned char *src = dst - distance;
 	size_t copied;
 
-	if (distance >= length) {
-		memcpy(dst, dst - distance, length);
+	if (distance == 0U) {
 		return;
 	}
 
-	memcpy(dst, dst - distance, distance);
+	if (distance >= length) {
+		memcpy(dst, src, length);
+		return;
+	}
+
+	if (distance >= 8U) {
+		while (length >= 8U) {
+			dst[0] = src[0];
+			dst[1] = src[1];
+			dst[2] = src[2];
+			dst[3] = src[3];
+			dst[4] = src[4];
+			dst[5] = src[5];
+			dst[6] = src[6];
+			dst[7] = src[7];
+			src += 8;
+			dst += 8;
+			length -= 8U;
+		}
+		while (length-- > 0U) {
+			*dst++ = *src++;
+		}
+		return;
+	}
+
+	memcpy(dst, src, distance);
 	copied = distance;
 	while (copied < length) {
 		size_t chunk = copied;

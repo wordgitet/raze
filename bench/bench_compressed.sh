@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-RUNS="${RUNS:-3}"
+RUNS="${RUNS:-7}"
 UNRAR_BIN="${UNRAR_BIN:-$(command -v unrar || true)}"
 UNRAR_THREADS="${UNRAR_THREADS:-1}"
 ARCHIVES=(
@@ -34,6 +34,28 @@ median_from_stdin() {
             }
         }
     '
+}
+
+percentile_from_file() {
+    local file="$1"
+    local numerator="$2"
+    local denominator="$3"
+    awk -v nmr="$numerator" -v dnm="$denominator" '
+        { values[++count] = $1 }
+        END {
+            if (count == 0) {
+                print "0"
+                exit
+            }
+            idx = int((count * nmr + dnm - 1) / dnm)
+            if (idx < 1) {
+                idx = 1
+            } else if (idx > count) {
+                idx = count
+            }
+            print values[idx]
+        }
+    ' "$file"
 }
 
 run_and_measure_seconds() {
@@ -81,6 +103,20 @@ for archive in "${ARCHIVES[@]}"; do
 
     raze_times_file="$TMP_DIR/raze_$(basename "$archive").txt"
     unrar_times_file="$TMP_DIR/unrar_$(basename "$archive").txt"
+    raze_sorted_file="$TMP_DIR/raze_sorted_$(basename "$archive").txt"
+    unrar_sorted_file="$TMP_DIR/unrar_sorted_$(basename "$archive").txt"
+
+    log "warmup for $(basename "$archive") [raze]"
+    run_and_measure_seconds \
+        "$TMP_DIR/raze_warmup" \
+        "$ROOT_DIR/raze" x -idq -o+ -op"$TMP_DIR/raze_warmup" "$archive" \
+        >/dev/null
+
+    log "warmup for $(basename "$archive") [unrar]"
+    run_and_measure_seconds \
+        "$TMP_DIR/unrar_warmup" \
+        "$UNRAR_BIN" x -idq -o+ -mt"$UNRAR_THREADS" "$archive" "$TMP_DIR/unrar_warmup/" \
+        >/dev/null
 
     log "running $RUNS runs for $(basename "$archive") [raze]"
     for _ in $(seq 1 "$RUNS"); do
@@ -98,11 +134,15 @@ for archive in "${ARCHIVES[@]}"; do
             >> "$unrar_times_file"
     done
 
-    raze_median="$(sort -n "$raze_times_file" | median_from_stdin)"
-    unrar_median="$(sort -n "$unrar_times_file" | median_from_stdin)"
+    sort -n "$raze_times_file" > "$raze_sorted_file"
+    sort -n "$unrar_times_file" > "$unrar_sorted_file"
+    raze_median="$(median_from_stdin < "$raze_sorted_file")"
+    unrar_median="$(median_from_stdin < "$unrar_sorted_file")"
+    raze_p90="$(percentile_from_file "$raze_sorted_file" 9 10)"
+    unrar_p90="$(percentile_from_file "$unrar_sorted_file" 9 10)"
     raze_mbps="$(awk -v b="$bytes" -v t="$raze_median" 'BEGIN { printf "%.2f", (b / 1048576.0) / t }')"
     unrar_mbps="$(awk -v b="$bytes" -v t="$unrar_median" 'BEGIN { printf "%.2f", (b / 1048576.0) / t }')"
     gap_pct="$(awk -v r="$raze_median" -v u="$unrar_median" 'BEGIN { printf "%.2f", ((r - u) / u) * 100.0 }')"
 
-    log "$(basename "$archive"): raze=${raze_median}s (${raze_mbps} MiB/s), unrar=${unrar_median}s (${unrar_mbps} MiB/s), gap=${gap_pct}%"
+    log "$(basename "$archive"): raze p50=${raze_median}s p90=${raze_p90}s (${raze_mbps} MiB/s), unrar p50=${unrar_median}s p90=${unrar_p90}s (${unrar_mbps} MiB/s), gap=${gap_pct}%"
 done
