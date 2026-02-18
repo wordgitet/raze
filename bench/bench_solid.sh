@@ -4,6 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 RUNS="${RUNS:-3}"
 UNRAR_BIN="${UNRAR_BIN:-$(command -v unrar || true)}"
+UNRAR_THREADS="${UNRAR_THREADS:-1}"
 ARCHIVES=(
     "${ROOT_DIR}/corpus/local/archives/local_best_solid.rar"
     "${ROOT_DIR}/corpus/local/thematic/archives/thematic_best_solid.rar"
@@ -93,7 +94,7 @@ for archive in "${ARCHIVES[@]}"; do
     for _ in $(seq 1 "$RUNS"); do
         run_and_measure_seconds \
             "$TMP_DIR/unrar_out" \
-            "$UNRAR_BIN" x -idq -o+ "$archive" "$TMP_DIR/unrar_out/" \
+            "$UNRAR_BIN" x -idq -o+ -mt"$UNRAR_THREADS" "$archive" "$TMP_DIR/unrar_out/" \
             >> "$unrar_times_file"
     done
 

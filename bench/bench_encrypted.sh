@@ -4,6 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 RUNS="${RUNS:-3}"
 UNRAR_BIN="${UNRAR_BIN:-$(command -v unrar || true)}"
+UNRAR_THREADS="${UNRAR_THREADS:-1}"
 RAR_BIN="${RAR_BIN:-$(command -v rar || true)}"
 PASSWORD="${PASSWORD:-secret}"
 
@@ -75,7 +76,7 @@ run_one_bench() {
 	for _ in $(seq 1 "$RUNS"); do
 		run_and_measure_seconds \
 			"$tmp_dir/unrar_out" \
-			"$UNRAR_BIN" x -idq -o+ -p"$PASSWORD" \
+			"$UNRAR_BIN" x -idq -o+ -mt"$UNRAR_THREADS" -p"$PASSWORD" \
 			"$archive" "$tmp_dir/unrar_out/" \
 			>> "$unrar_times_file"
 	done

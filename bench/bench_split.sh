@@ -4,6 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 RUNS="${RUNS:-3}"
 UNRAR_BIN="${UNRAR_BIN:-$(command -v unrar || true)}"
+UNRAR_THREADS="${UNRAR_THREADS:-1}"
 RAR_BIN="${RAR_BIN:-$(command -v rar || true)}"
 
 log() {
@@ -83,7 +84,7 @@ log "running $RUNS runs [unrar]"
 for _ in $(seq 1 "$RUNS"); do
     run_and_measure_seconds \
         "$TMP_DIR/unrar_out" \
-        "$UNRAR_BIN" x -idq -o+ "$PART1" "$TMP_DIR/unrar_out/" \
+        "$UNRAR_BIN" x -idq -o+ -mt"$UNRAR_THREADS" "$PART1" "$TMP_DIR/unrar_out/" \
         >> "$unrar_times_file"
 done
 

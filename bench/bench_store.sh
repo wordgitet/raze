@@ -6,6 +6,7 @@ ARCHIVE="${1:-$ROOT_DIR/corpus/local/archives/local_store.rar}"
 SOURCE_DIR="${SOURCE_DIR:-$ROOT_DIR/corpus/local/source}"
 RUNS="${RUNS:-3}"
 UNRAR_BIN="${UNRAR_BIN:-$(command -v unrar || true)}"
+UNRAR_THREADS="${UNRAR_THREADS:-1}"
 
 log() {
     printf '[bench-store] %s\n' "$*"
@@ -73,7 +74,7 @@ done
 
 log "running $RUNS benchmark runs for unrar"
 for i in $(seq 1 "$RUNS"); do
-    run_and_measure_seconds "$TMP_DIR/unrar_out" "$UNRAR_BIN" x -idq -o+ "$ARCHIVE" "$TMP_DIR/unrar_out/" >> "$UNRAR_TIMES_FILE"
+    run_and_measure_seconds "$TMP_DIR/unrar_out" "$UNRAR_BIN" x -idq -o+ -mt"$UNRAR_THREADS" "$ARCHIVE" "$TMP_DIR/unrar_out/" >> "$UNRAR_TIMES_FILE"
 done
 
 RAZE_MEDIAN="$(sort -n "$RAZE_TIMES_FILE" | median_from_stdin)"
