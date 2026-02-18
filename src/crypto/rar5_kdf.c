@@ -1,5 +1,6 @@
 #include "rar5_kdf.h"
 
+#include <limits.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -142,6 +143,86 @@ static int hmac_sha256(
 	}
 	return out_len == 32U;
 }
+
+typedef struct RazeHmacSha256Ctx {
+	HMAC_CTX *base;
+	HMAC_CTX *work;
+} RazeHmacSha256Ctx;
+
+#if defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
+
+static void hmac_sha256_ctx_free(RazeHmacSha256Ctx *ctx)
+{
+	if (ctx == 0) {
+		return;
+	}
+	HMAC_CTX_free(ctx->work);
+	HMAC_CTX_free(ctx->base);
+	ctx->work = 0;
+	ctx->base = 0;
+}
+
+static int hmac_sha256_ctx_init(
+	RazeHmacSha256Ctx *ctx,
+	const unsigned char *key,
+	size_t key_len
+)
+{
+	if (ctx == 0 || key == 0 || key_len > (size_t)INT_MAX) {
+		return 0;
+	}
+
+	ctx->base = 0;
+	ctx->work = 0;
+	ctx->base = HMAC_CTX_new();
+	ctx->work = HMAC_CTX_new();
+	if (ctx->base == 0 || ctx->work == 0) {
+		hmac_sha256_ctx_free(ctx);
+		return 0;
+	}
+	if (HMAC_Init_ex(
+			ctx->base,
+			key,
+			(int)key_len,
+			EVP_sha256(),
+			0
+		) != 1) {
+		hmac_sha256_ctx_free(ctx);
+		return 0;
+	}
+	return 1;
+}
+
+static int hmac_sha256_ctx_compute(
+	RazeHmacSha256Ctx *ctx,
+	const unsigned char *data,
+	size_t data_len,
+	unsigned char out[32]
+)
+{
+	unsigned int out_len = 0U;
+
+	if (ctx == 0 || ctx->base == 0 || ctx->work == 0 || data == 0 || out == 0) {
+		return 0;
+	}
+	if (HMAC_CTX_copy(ctx->work, ctx->base) != 1) {
+		return 0;
+	}
+	if (HMAC_Update(ctx->work, data, data_len) != 1) {
+		return 0;
+	}
+	if (HMAC_Final(ctx->work, out, &out_len) != 1) {
+		return 0;
+	}
+	return out_len == 32U;
+}
+
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
 #endif
 
 int raze_rar5_kdf_derive(
@@ -161,6 +242,8 @@ int raze_rar5_kdf_derive(
 	uint32_t count;
 	uint32_t i;
 	uint32_t j;
+	RazeHmacSha256Ctx hmac_ctx;
+	int hmac_ctx_valid = 0;
 
 	if (password_utf8 == 0 || salt == 0 || key_out == 0 || hash_key_out == 0 || psw_value_out == 0) {
 		return 0;
@@ -178,26 +261,31 @@ int raze_rar5_kdf_derive(
 	}
 
 	pwd_len = strlen(password_utf8);
+	if (!hmac_sha256_ctx_init(&hmac_ctx, (const unsigned char *)password_utf8, pwd_len)) {
+		return 0;
+	}
+	hmac_ctx_valid = 1;
 	memcpy(salt_plus_index, salt, RAZE_RAR5_SALT_SIZE);
 	salt_plus_index[RAZE_RAR5_SALT_SIZE + 0U] = 0U;
 	salt_plus_index[RAZE_RAR5_SALT_SIZE + 1U] = 0U;
 	salt_plus_index[RAZE_RAR5_SALT_SIZE + 2U] = 0U;
 	salt_plus_index[RAZE_RAR5_SALT_SIZE + 3U] = 1U;
 
-	if (!hmac_sha256(
-			(const unsigned char *)password_utf8,
-			pwd_len,
+	if (!hmac_sha256_ctx_compute(
+			&hmac_ctx,
 			salt_plus_index,
 			sizeof(salt_plus_index),
 			u
 		)) {
+		hmac_sha256_ctx_free(&hmac_ctx);
 		secure_zero(salt_plus_index, sizeof(salt_plus_index));
 		return 0;
 	}
 	memcpy(f, u, sizeof(f));
 
 	for (i = 0U; i < count - 1U; ++i) {
-		if (!hmac_sha256((const unsigned char *)password_utf8, pwd_len, u, sizeof(u), u)) {
+		if (!hmac_sha256_ctx_compute(&hmac_ctx, u, sizeof(u), u)) {
+			hmac_sha256_ctx_free(&hmac_ctx);
 			secure_zero(salt_plus_index, sizeof(salt_plus_index));
 			secure_zero(u, sizeof(u));
 			secure_zero(f, sizeof(f));
@@ -210,7 +298,8 @@ int raze_rar5_kdf_derive(
 	memcpy(key_out, f, RAZE_RAR5_KEY_SIZE);
 
 	for (i = 0U; i < 16U; ++i) {
-		if (!hmac_sha256((const unsigned char *)password_utf8, pwd_len, u, sizeof(u), u)) {
+		if (!hmac_sha256_ctx_compute(&hmac_ctx, u, sizeof(u), u)) {
+			hmac_sha256_ctx_free(&hmac_ctx);
 			secure_zero(salt_plus_index, sizeof(salt_plus_index));
 			secure_zero(u, sizeof(u));
 			secure_zero(f, sizeof(f));
@@ -223,7 +312,8 @@ int raze_rar5_kdf_derive(
 	memcpy(hash_key_out, f, RAZE_RAR5_HASH_KEY_SIZE);
 
 	for (i = 0U; i < 16U; ++i) {
-		if (!hmac_sha256((const unsigned char *)password_utf8, pwd_len, u, sizeof(u), u)) {
+		if (!hmac_sha256_ctx_compute(&hmac_ctx, u, sizeof(u), u)) {
+			hmac_sha256_ctx_free(&hmac_ctx);
 			secure_zero(salt_plus_index, sizeof(salt_plus_index));
 			secure_zero(u, sizeof(u));
 			secure_zero(f, sizeof(f));
@@ -236,6 +326,9 @@ int raze_rar5_kdf_derive(
 	memcpy(psw_value_out, f, RAZE_RAR5_KEY_SIZE);
 	kdf_cache_store(password_utf8, salt, lg2_count, key_out, hash_key_out, psw_value_out);
 
+	if (hmac_ctx_valid) {
+		hmac_sha256_ctx_free(&hmac_ctx);
+	}
 	secure_zero(salt_plus_index, sizeof(salt_plus_index));
 	secure_zero(u, sizeof(u));
 	secure_zero(f, sizeof(f));
