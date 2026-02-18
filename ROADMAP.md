@@ -80,7 +80,7 @@ Build a fast, modular RAR5 decompressor in C with measurable performance wins an
 - Chosen feature set is complete and documented.
 - Unsupported features fail clearly and safely.
 
-## Phase 5: Performance + Full RAR5 BLAKE Integrity - IN PROGRESS
+## Phase 5: Performance + Full RAR5 BLAKE Integrity - DONE
 
 ### Deliverables
 
@@ -89,7 +89,7 @@ Build a fast, modular RAR5 decompressor in C with measurable performance wins an
 - Unknown file-hash type handling as unsupported feature (`exit 3`). - DONE
 - Benchmark script normalization (`RUNS=7`, warmup, `p50`/`p90`, target-gap reporting). - DONE
 - Preserve hard gates where already present (`bench-store`, `bench-encrypted`). - DONE
-- Performance tuning pass for remaining encrypted-path gap. - IN PROGRESS
+- Performance tuning pass for remaining encrypted-path gap. - DONE
 
 ### Exit Criteria
 
@@ -112,6 +112,6 @@ Build a fast, modular RAR5 decompressor in C with measurable performance wins an
 
 ## Immediate Next Steps
 
-1. Profile and optimize encrypted decode/hash path to pass `bench-encrypted` <=10% gap.
-2. Add focused corruption/fuzz cases for encrypted split boundaries and hash extras.
-3. Continue hot-path tuning in decode/filter/write loops while keeping `make test` green.
+1. Add focused corruption/fuzz cases for encrypted split boundaries and hash extras.
+2. Continue hot-path tuning in decode/filter/write loops while keeping `make test` green.
+3. Start Phase 6 hardening work (CI, sanitizers, and fuzz harnesses).

@@ -102,6 +102,10 @@ Scripts detect already downloaded/generated artifacts and skip unnecessary work.
   - format: `raze: <status>: <detail>`
   - example: `raze: io error: cannot open volume '...': No such file or directory`
 - Exit code mapping is unchanged and deterministic.
+- Encrypted-path stage timings can be enabled for tuning:
+  - `RAZE_PROFILE_ENC=1 ./raze x -psecret -opout archive.rar`
+  - prints per-entry/archive timings for `kdf`, `decrypt`, `unpack`,
+    `hash_verify`, and `write`.
 
 ## UnRAR Compatibility Reference
 
