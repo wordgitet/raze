@@ -10,6 +10,8 @@ Defaults:
 - reports `p50` and `p90`
 - hard fail gates: `bench-store`, `bench-encrypted` (must be <=10% slower)
 - warning-only target checks: `bench-compressed`, `bench-solid`, `bench-split`
+- `bench-encrypted` prints both `data-encrypted` and `header-encrypted` results
+  before the final pass/fail decision.
 
 Run:
 

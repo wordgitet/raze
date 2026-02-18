@@ -85,6 +85,7 @@ run_one_bench() {
 	local raze_mbps
 	local unrar_mbps
 	local gap_pct
+	local gate_fail=0
 
 	raze_times_file="$tmp_dir/raze_${label}.txt"
 	unrar_times_file="$tmp_dir/unrar_${label}.txt"
@@ -140,8 +141,11 @@ run_one_bench() {
 unrar p50=${unrar_p50}s p90=${unrar_p90}s (${unrar_mbps} MiB/s), gap=${gap_pct}%"
 
 	if awk -v g="$gap_pct" 'BEGIN { exit !(g > 10.0) }'; then
-		fail "$label gate failed: raze is more than 10% slower than unrar"
+		log "$label gate failed: raze is more than 10% slower than unrar"
+		gate_fail=1
 	fi
+
+	return "$gate_fail"
 }
 
 [[ -n "$UNRAR_BIN" ]] || fail "unrar binary not found. Set UNRAR_BIN."
@@ -170,7 +174,12 @@ dd if=/dev/urandom of="$SRC_DIR/enc/blob.bin" bs=1K count=2048 status=none
 bytes="$(du -sb "$SRC_DIR" | awk '{print $1}')"
 [[ "$bytes" -gt 0 ]] || fail "source fixture size is zero"
 
-run_one_bench "$DATA_ARCHIVE" "data-encrypted" "$bytes" "$TMP_DIR"
-run_one_bench "$HEAD_ARCHIVE" "header-encrypted" "$bytes" "$TMP_DIR"
+gate_failed=0
+run_one_bench "$DATA_ARCHIVE" "data-encrypted" "$bytes" "$TMP_DIR" || gate_failed=1
+run_one_bench "$HEAD_ARCHIVE" "header-encrypted" "$bytes" "$TMP_DIR" || gate_failed=1
+
+if [[ "$gate_failed" -ne 0 ]]; then
+	fail "performance gate failed: one or more encrypted benches exceeded 10% gap"
+fi
 
 log "performance gates passed (<=10% slower than unrar)"
