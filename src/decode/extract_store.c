@@ -6,12 +6,15 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <sys/types.h>
 #include <time.h>
 
 #include "../checksum/crc32.h"
 #include "../cli/overwrite_prompt.h"
 #include "../format/rar5/block_reader.h"
+#include "../format/rar5/file_header.h"
 #include "../format/rar5/vint.h"
+#include "../io/fs_meta.h"
 #include "../io/path_guard.h"
 #include "decode_internal.h"
 
@@ -21,28 +24,22 @@
 #define RAZE_RAR5_HEAD_CRYPT 4U
 #define RAZE_RAR5_HEAD_ENDARC 5U
 
-#define RAZE_RAR5_HFL_SPLITBEFORE 0x0008U
-#define RAZE_RAR5_HFL_SPLITAFTER 0x0010U
-
 #define RAZE_RAR5_MHFL_VOLUME 0x0001U
 #define RAZE_RAR5_MHFL_SOLID 0x0004U
 
-#define RAZE_RAR5_FHFL_DIRECTORY 0x0001U
-#define RAZE_RAR5_FHFL_UTIME 0x0002U
-#define RAZE_RAR5_FHFL_CRC32 0x0004U
-#define RAZE_RAR5_FHFL_UNPUNKNOWN 0x0008U
+typedef struct PendingDirMeta {
+    char *path;
+    int has_mode;
+    mode_t mode;
+    int has_mtime;
+    time_t mtime;
+} PendingDirMeta;
 
-#define RAZE_RAR5_FCI_SOLID 0x00000040U
-#define RAZE_RAR5_FHEXTRA_CRYPT 0x01U
-#define RAZE_RAR5_HOST_OS_WINDOWS 0U
-#define RAZE_RAR5_HOST_OS_UNIX 1U
-
-static uint32_t read_u32le(const unsigned char raw[4]) {
-    return ((uint32_t)raw[0]) |
-           ((uint32_t)raw[1] << 8) |
-           ((uint32_t)raw[2] << 16) |
-           ((uint32_t)raw[3] << 24);
-}
+typedef struct PendingDirMetaList {
+    PendingDirMeta *items;
+    size_t count;
+    size_t capacity;
+} PendingDirMetaList;
 
 static int skip_forward(FILE *file, uint64_t bytes) {
     while (bytes > 0) {
@@ -60,148 +57,95 @@ static int skip_forward(FILE *file, uint64_t bytes) {
     return 1;
 }
 
-static int parse_extra_has_crypt(const unsigned char *buf, size_t extra_len) {
-    size_t cursor = 0;
+static void pending_dir_meta_list_free(PendingDirMetaList *list) {
+    size_t i;
 
-    while (cursor < extra_len) {
-        uint64_t field_size = 0;
-        uint64_t field_type = 0;
-        size_t consumed = 0;
-        size_t next_pos;
-
-        if (!raze_vint_decode(buf + cursor, extra_len - cursor, &consumed, &field_size)) {
-            return 0;
-        }
-        cursor += consumed;
-        if (field_size == 0 || field_size > extra_len - cursor) {
-            return 0;
-        }
-
-        next_pos = cursor + (size_t)field_size;
-        if (!raze_vint_decode(buf + cursor, next_pos - cursor, &consumed, &field_type)) {
-            return 0;
-        }
-        cursor += consumed;
-
-        if (field_type == RAZE_RAR5_FHEXTRA_CRYPT) {
-            return 1;
-        }
-        cursor = next_pos;
+    if (list == 0) {
+        return;
     }
 
-    return 0;
+    for (i = 0; i < list->count; ++i) {
+        free(list->items[i].path);
+    }
+    free(list->items);
+    list->items = 0;
+    list->count = 0;
+    list->capacity = 0;
 }
 
-static int parse_file_header(
-    const RazeRar5BlockHeader *block,
-    const unsigned char *buf,
-    size_t buf_len,
-    RazeRar5FileHeader *file_header
+static RazeStatus pending_dir_meta_list_add(
+    PendingDirMetaList *list,
+    const char *path,
+    int has_mode,
+    mode_t mode,
+    int has_mtime,
+    time_t mtime
 ) {
-    size_t cursor;
-    size_t consumed = 0;
-    uint64_t comp_info = 0;
-    uint64_t name_len = 0;
-    uint64_t dummy = 0;
-    unsigned char crc_raw[4];
+    PendingDirMeta *expanded;
+    size_t path_len;
 
-    if (block == 0 || buf == 0 || file_header == 0) {
-        return 0;
-    }
-    if (block->extra_offset > buf_len || block->body_offset > block->extra_offset) {
-        return 0;
+    if (list == 0 || path == 0) {
+        return RAZE_STATUS_BAD_ARGUMENT;
     }
 
-    memset(file_header, 0, sizeof(*file_header));
-    file_header->pack_size = block->data_size;
-    file_header->split_before = (block->flags & RAZE_RAR5_HFL_SPLITBEFORE) != 0;
-    file_header->split_after = (block->flags & RAZE_RAR5_HFL_SPLITAFTER) != 0;
-    cursor = block->body_offset;
-
-    if (!raze_vint_decode(buf + cursor, block->extra_offset - cursor, &consumed, &file_header->file_flags)) {
-        return 0;
-    }
-    cursor += consumed;
-
-    if (!raze_vint_decode(buf + cursor, block->extra_offset - cursor, &consumed, &file_header->unp_size)) {
-        return 0;
-    }
-    cursor += consumed;
-
-    if (!raze_vint_decode(buf + cursor, block->extra_offset - cursor, &consumed, &dummy)) {
-        return 0;
-    }
-    cursor += consumed;
-
-    if ((file_header->file_flags & RAZE_RAR5_FHFL_UTIME) != 0) {
-        if (block->extra_offset - cursor < 4) {
-            return 0;
+    if (list->count == list->capacity) {
+        size_t new_capacity = list->capacity == 0 ? 8U : list->capacity * 2U;
+        expanded = (PendingDirMeta *)realloc(list->items, new_capacity * sizeof(*expanded));
+        if (expanded == 0) {
+            return RAZE_STATUS_IO;
         }
-        file_header->unix_mtime = read_u32le(buf + cursor);
-        file_header->mtime_present = 1;
-        cursor += 4;
+        list->items = expanded;
+        list->capacity = new_capacity;
     }
 
-    if ((file_header->file_flags & RAZE_RAR5_FHFL_CRC32) != 0) {
-        if (block->extra_offset - cursor < 4) {
-            return 0;
+    path_len = strlen(path) + 1U;
+    list->items[list->count].path = (char *)malloc(path_len);
+    if (list->items[list->count].path == 0) {
+        return RAZE_STATUS_IO;
+    }
+    memcpy(list->items[list->count].path, path, path_len);
+    list->items[list->count].has_mode = has_mode;
+    list->items[list->count].mode = mode;
+    list->items[list->count].has_mtime = has_mtime;
+    list->items[list->count].mtime = mtime;
+    list->count += 1;
+
+    return RAZE_STATUS_OK;
+}
+
+static void apply_entry_metadata(const RazeRar5FileHeader *fh, const char *path, int quiet) {
+    mode_t mode;
+
+    if (fh == 0 || path == 0) {
+        return;
+    }
+
+    if (raze_fs_compute_mode(fh->host_os, fh->file_attr, fh->is_dir, &mode)) {
+        raze_fs_apply_mode(path, mode, quiet);
+    }
+
+    if (fh->mtime_present) {
+        raze_fs_apply_mtime(path, (time_t)fh->unix_mtime, quiet);
+    }
+}
+
+static void apply_pending_dir_metadata(const PendingDirMetaList *list, int quiet) {
+    size_t i;
+
+    if (list == 0) {
+        return;
+    }
+
+    for (i = 0; i < list->count; ++i) {
+        const PendingDirMeta *item = &list->items[i];
+
+        if (item->has_mode) {
+            raze_fs_apply_mode(item->path, item->mode, quiet);
         }
-        memcpy(crc_raw, buf + cursor, sizeof(crc_raw));
-        file_header->crc32 = read_u32le(crc_raw);
-        file_header->crc32_present = 1;
-        cursor += 4;
-    }
-
-    if (!raze_vint_decode(buf + cursor, block->extra_offset - cursor, &consumed, &comp_info)) {
-        return 0;
-    }
-    cursor += consumed;
-
-    if (!raze_vint_decode(buf + cursor, block->extra_offset - cursor, &consumed, &file_header->host_os)) {
-        return 0;
-    }
-    cursor += consumed;
-
-    if (!raze_vint_decode(buf + cursor, block->extra_offset - cursor, &consumed, &name_len)) {
-        return 0;
-    }
-    cursor += consumed;
-
-    if (name_len == 0 || name_len > block->extra_offset - cursor || name_len >= (uint64_t)SIZE_MAX) {
-        return 0;
-    }
-    if (memchr(buf + cursor, '\0', (size_t)name_len) != 0) {
-        return 0;
-    }
-
-    file_header->name = (char *)malloc((size_t)name_len + 1U);
-    if (file_header->name == 0) {
-        return 0;
-    }
-    memcpy(file_header->name, buf + cursor, (size_t)name_len);
-    file_header->name[(size_t)name_len] = '\0';
-    file_header->name_len = (size_t)name_len;
-    cursor += (size_t)name_len;
-
-    file_header->method = (comp_info >> 7U) & 0x7U;
-    file_header->solid = (comp_info & RAZE_RAR5_FCI_SOLID) != 0;
-    file_header->is_dir = (file_header->file_flags & RAZE_RAR5_FHFL_DIRECTORY) != 0;
-
-    if (block->extra_size > 0) {
-        const unsigned char *extra_ptr = buf + block->extra_offset;
-        if (parse_extra_has_crypt(extra_ptr, (size_t)block->extra_size)) {
-            file_header->encrypted = 1;
+        if (item->has_mtime) {
+            raze_fs_apply_mtime(item->path, item->mtime, quiet);
         }
     }
-
-    if (cursor > buf_len) {
-        free(file_header->name);
-        file_header->name = 0;
-        file_header->name_len = 0;
-        return 0;
-    }
-
-    return 1;
 }
 
 static RazeStatus ensure_supported_file(const RazeRar5FileHeader *fh) {
@@ -287,7 +231,8 @@ static RazeStatus handle_file_block(
     size_t buf_len,
     const char *output_dir,
     const RazeExtractOptions *options,
-    RazeOverwritePrompt *prompt
+    RazeOverwritePrompt *prompt,
+    PendingDirMetaList *pending_dirs
 ) {
     RazeRar5FileHeader fh;
     struct stat st;
@@ -298,7 +243,7 @@ static RazeStatus handle_file_block(
 
     memset(&fh, 0, sizeof(fh));
 
-    if (!parse_file_header(block, buf, buf_len, &fh)) {
+    if (!raze_rar5_parse_file_header(block, buf, buf_len, &fh)) {
         return RAZE_STATUS_BAD_ARCHIVE;
     }
 
@@ -313,18 +258,33 @@ static RazeStatus handle_file_block(
     }
 
     if (fh.is_dir) {
+        mode_t dir_mode = 0;
+        int has_mode = raze_fs_compute_mode(fh.host_os, fh.file_attr, 1, &dir_mode);
+        int has_mtime = fh.mtime_present;
+        time_t dir_mtime = (time_t)fh.unix_mtime;
+
         if (options != 0 && options->verbose && !options->quiet) {
             printf("mkdir %s\n", out_path);
         }
+
         status = raze_path_guard_make_dirs(out_path);
         if (status != RAZE_STATUS_OK) {
             goto done;
         }
+
         if (!skip_forward(archive, block->data_size)) {
             status = RAZE_STATUS_BAD_ARCHIVE;
             goto done;
         }
-        status = RAZE_STATUS_OK;
+
+        status = pending_dir_meta_list_add(
+            pending_dirs,
+            out_path,
+            has_mode,
+            dir_mode,
+            has_mtime,
+            dir_mtime
+        );
         goto done;
     }
 
@@ -390,6 +350,10 @@ static RazeStatus handle_file_block(
     }
     output = 0;
 
+    if (status == RAZE_STATUS_OK) {
+        apply_entry_metadata(&fh, out_path, options != 0 ? options->quiet : 0);
+    }
+
     if (status == RAZE_STATUS_CRC_MISMATCH || status == RAZE_STATUS_IO || status == RAZE_STATUS_BAD_ARCHIVE) {
         remove_output = 1;
     }
@@ -401,7 +365,7 @@ done:
     if (remove_output) {
         remove(out_path);
     }
-    free(fh.name);
+    raze_rar5_file_header_free(&fh);
     return status;
 }
 
@@ -412,11 +376,14 @@ RazeStatus raze_extract_store_archive(
 ) {
     FILE *file;
     RazeOverwritePrompt prompt;
+    PendingDirMetaList pending_dirs;
     RazeExtractOptions local_options;
     int saw_main = 0;
     int saw_end = 0;
     RazeStatus status;
     RazeRar5ReadResult rr;
+
+    memset(&pending_dirs, 0, sizeof(pending_dirs));
 
     if (archive_path == 0 || output_dir == 0) {
         return RAZE_STATUS_BAD_ARGUMENT;
@@ -456,8 +423,7 @@ RazeStatus raze_extract_store_archive(
         }
         if (rr == RAZE_RAR5_READ_ERROR) {
             free(buf);
-            fclose(file);
-            return status;
+            goto cleanup;
         }
 
         switch (block.header_type) {
@@ -467,71 +433,79 @@ RazeStatus raze_extract_store_archive(
                 size_t cursor = block.body_offset;
                 saw_main = 1;
                 if (!raze_vint_decode(buf + cursor, block.extra_offset - cursor, &consumed, &arc_flags)) {
+                    status = RAZE_STATUS_BAD_ARCHIVE;
                     free(buf);
-                    fclose(file);
-                    return RAZE_STATUS_BAD_ARCHIVE;
+                    goto cleanup;
                 }
                 if ((arc_flags & RAZE_RAR5_MHFL_VOLUME) != 0 ||
                     (arc_flags & RAZE_RAR5_MHFL_SOLID) != 0) {
+                    status = RAZE_STATUS_UNSUPPORTED_FEATURE;
                     free(buf);
-                    fclose(file);
-                    return RAZE_STATUS_UNSUPPORTED_FEATURE;
+                    goto cleanup;
                 }
                 if (!skip_forward(file, block.data_size)) {
+                    status = RAZE_STATUS_BAD_ARCHIVE;
                     free(buf);
-                    fclose(file);
-                    return RAZE_STATUS_BAD_ARCHIVE;
+                    goto cleanup;
                 }
                 break;
             }
             case RAZE_RAR5_HEAD_FILE:
-                status = handle_file_block(file, &block, buf, buf_len, output_dir, options, &prompt);
+                status = handle_file_block(
+                    file,
+                    &block,
+                    buf,
+                    buf_len,
+                    output_dir,
+                    options,
+                    &prompt,
+                    &pending_dirs
+                );
                 if (status != RAZE_STATUS_OK) {
                     free(buf);
-                    fclose(file);
-                    return status;
+                    goto cleanup;
                 }
                 break;
             case RAZE_RAR5_HEAD_SERVICE: {
                 RazeRar5FileHeader service_header;
                 memset(&service_header, 0, sizeof(service_header));
-                if (!parse_file_header(&block, buf, buf_len, &service_header)) {
+                if (!raze_rar5_parse_file_header(&block, buf, buf_len, &service_header)) {
+                    status = RAZE_STATUS_BAD_ARCHIVE;
                     free(buf);
-                    fclose(file);
-                    return RAZE_STATUS_BAD_ARCHIVE;
+                    goto cleanup;
                 }
                 if (service_header.encrypted) {
-                    free(service_header.name);
+                    status = RAZE_STATUS_UNSUPPORTED_FEATURE;
+                    raze_rar5_file_header_free(&service_header);
                     free(buf);
-                    fclose(file);
-                    return RAZE_STATUS_UNSUPPORTED_FEATURE;
+                    goto cleanup;
                 }
                 if (!skip_forward(file, block.data_size)) {
-                    free(service_header.name);
+                    status = RAZE_STATUS_BAD_ARCHIVE;
+                    raze_rar5_file_header_free(&service_header);
                     free(buf);
-                    fclose(file);
-                    return RAZE_STATUS_BAD_ARCHIVE;
+                    goto cleanup;
                 }
-                free(service_header.name);
+                raze_rar5_file_header_free(&service_header);
                 break;
             }
             case RAZE_RAR5_HEAD_CRYPT:
+                status = RAZE_STATUS_UNSUPPORTED_FEATURE;
                 free(buf);
-                fclose(file);
-                return RAZE_STATUS_UNSUPPORTED_FEATURE;
+                goto cleanup;
             case RAZE_RAR5_HEAD_ENDARC:
                 saw_end = 1;
                 if (!skip_forward(file, block.data_size)) {
+                    status = RAZE_STATUS_BAD_ARCHIVE;
                     free(buf);
-                    fclose(file);
-                    return RAZE_STATUS_BAD_ARCHIVE;
+                    goto cleanup;
                 }
                 break;
             default:
                 if (!skip_forward(file, block.data_size)) {
+                    status = RAZE_STATUS_BAD_ARCHIVE;
                     free(buf);
-                    fclose(file);
-                    return RAZE_STATUS_BAD_ARCHIVE;
+                    goto cleanup;
                 }
                 break;
         }
@@ -539,9 +513,16 @@ RazeStatus raze_extract_store_archive(
         free(buf);
     }
 
-    fclose(file);
     if (!saw_main || !saw_end) {
-        return RAZE_STATUS_BAD_ARCHIVE;
+        status = RAZE_STATUS_BAD_ARCHIVE;
+        goto cleanup;
     }
-    return RAZE_STATUS_OK;
+
+    apply_pending_dir_metadata(&pending_dirs, options->quiet);
+    status = RAZE_STATUS_OK;
+
+cleanup:
+    pending_dir_meta_list_free(&pending_dirs);
+    fclose(file);
+    return status;
 }

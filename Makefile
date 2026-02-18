@@ -17,7 +17,7 @@ endif
 SRCS := $(shell find src -type f -name '*.c' | sort)
 OBJS := $(patsubst %.c,$(BUILD_DIR)/%.o,$(SRCS))
 
-.PHONY: all clean run test bench-store corpus corpus-fetch corpus-local
+.PHONY: all clean run test bench-store corpus corpus-fetch corpus-local corpus-themed
 
 all: $(TARGET)
 
@@ -46,7 +46,10 @@ corpus-fetch:
 corpus-local:
 	./scripts/corpus_build_local.sh
 
-corpus: corpus-fetch corpus-local
+corpus-themed:
+	./scripts/corpus_build_thematic.sh
+
+corpus: corpus-fetch corpus-local corpus-themed
 
 clean:
 	rm -rf $(BUILD_DIR) $(TARGET)

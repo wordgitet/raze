@@ -11,7 +11,7 @@ Build a fast, modular RAR5 decompressor in C with measurable performance wins an
 - Profile-driven performance work only.
 - Small, testable modules over monolithic code.
 
-## Phase 0: Baseline and Corpus
+## Phase 0: Baseline and Corpus - DONE
 
 ### Deliverables
 
@@ -26,7 +26,7 @@ Build a fast, modular RAR5 decompressor in C with measurable performance wins an
 
 - We can run one command and compare `raze` vs `unrar` throughput and wall time.
 
-## Phase 1: RAR5 Container Parsing
+## Phase 1: RAR5 Container Parsing - DONE
 
 ### Deliverables
 
@@ -40,7 +40,7 @@ Build a fast, modular RAR5 decompressor in C with measurable performance wins an
 - `raze` can list archive entries and metadata from valid RAR5 files.
 - Parser tests cover valid, truncated, and malformed inputs.
 
-## Phase 2: Minimal Extraction Path
+## Phase 2: Minimal Extraction Path - DONE
 
 ### Deliverables
 
@@ -108,6 +108,6 @@ Build a fast, modular RAR5 decompressor in C with measurable performance wins an
 
 ## Immediate Next Steps
 
-1. Implement the benchmark corpus + baseline script (`Phase 0`).
-2. Implement RAR5 varint + block iterator (`Phase 1` core).
-3. Add parser tests for malformed input paths.
+1. Implement RAR5 compressed-method decode engine (`Phase 3`).
+2. Add correctness tests for mixed real-world compressed RAR5 samples.
+3. Begin perf baselining of decode hot paths before optimization.

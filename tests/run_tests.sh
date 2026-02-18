@@ -55,7 +55,9 @@ cc -std=c11 -O2 -Wall -Wextra -Wpedantic \
     "$ROOT_DIR/tests/test_parser_units.c" \
     "$ROOT_DIR/src/format/rar5/vint.c" \
     "$ROOT_DIR/src/format/rar5/block_reader.c" \
+    "$ROOT_DIR/src/format/rar5/file_header.c" \
     "$ROOT_DIR/src/checksum/crc32.c" \
+    "$ROOT_DIR/src/io/fs_meta.c" \
     -o "$PARSER_UNIT_BIN"
 "$PARSER_UNIT_BIN"
 
@@ -104,8 +106,14 @@ run_expect_exit 7 "$ROOT_DIR/raze" x -idq -op"$OUT_DIR" "$ARCHIVE_STORE"
 log "checking forced overwrite path"
 run_expect_exit 0 "$ROOT_DIR/raze" x -idq -o+ -op"$OUT_DIR" "$ARCHIVE_STORE"
 
+log "checking supported compatibility switches for extract"
+run_expect_exit 0 "$ROOT_DIR/raze" x -y -idq -op"$TMP_DIR/out_y" "$ARCHIVE_STORE"
+run_expect_exit 0 "$ROOT_DIR/raze" x -inul -o+ -op"$TMP_DIR/out_inul" "$ARCHIVE_STORE"
+
 log "checking -o switch compatibility (bare -o must be rejected)"
 run_expect_exit 2 "$ROOT_DIR/raze" x -idq -o "$ARCHIVE_STORE"
+run_expect_exit 2 "$ROOT_DIR/raze" x -idp "$ARCHIVE_STORE"
+run_expect_exit 2 "$ROOT_DIR/raze" l -idq "$ARCHIVE_STORE"
 
 log "checking SFX-prefixed archive signature scan"
 dd if=/dev/zero of="$TMP_DIR/sfx_prefix.bin" bs=1 count=512 status=none
@@ -148,6 +156,41 @@ if [[ ! -f "$LONG_OUT_DIR/$LONG_REL_FILE" ]]; then
 fi
 if ! cmp -s "$LONG_SRC_DIR/$LONG_REL_FILE" "$LONG_OUT_DIR/$LONG_REL_FILE"; then
     fail "extracted long path file content mismatch"
+fi
+
+log "checking metadata restore (mtime and mode)"
+META_SRC_DIR="$TMP_DIR/meta_src"
+META_OUT_DIR="$TMP_DIR/out_meta"
+META_ARCHIVE="$TMP_DIR/meta_store.rar"
+META_DIR_REL="meta_dir"
+META_FILE_REL="$META_DIR_REL/meta_file.txt"
+FILE_TS=1700000000
+DIR_TS=1700000060
+mkdir -p "$META_SRC_DIR/$META_DIR_REL"
+printf 'metadata fixture\n' > "$META_SRC_DIR/$META_FILE_REL"
+chmod 640 "$META_SRC_DIR/$META_FILE_REL"
+chmod 750 "$META_SRC_DIR/$META_DIR_REL"
+touch -m -d "@$FILE_TS" "$META_SRC_DIR/$META_FILE_REL"
+touch -m -d "@$DIR_TS" "$META_SRC_DIR/$META_DIR_REL"
+(
+    cd "$META_SRC_DIR"
+    "$RAR_BIN" a -idq -ma5 -m0 -s- -r "$META_ARCHIVE" .
+)
+run_expect_exit 0 "$ROOT_DIR/raze" x -idq -o+ -op"$META_OUT_DIR" "$META_ARCHIVE"
+if ! cmp -s "$META_SRC_DIR/$META_FILE_REL" "$META_OUT_DIR/$META_FILE_REL"; then
+    fail "metadata fixture content mismatch"
+fi
+if [[ "$(stat -c %a "$META_OUT_DIR/$META_FILE_REL")" != "640" ]]; then
+    fail "metadata file mode mismatch"
+fi
+if [[ "$(stat -c %a "$META_OUT_DIR/$META_DIR_REL")" != "750" ]]; then
+    fail "metadata directory mode mismatch"
+fi
+if [[ "$(stat -c %Y "$META_OUT_DIR/$META_FILE_REL")" -ne "$FILE_TS" ]]; then
+    fail "metadata file mtime mismatch"
+fi
+if [[ "$(stat -c %Y "$META_OUT_DIR/$META_DIR_REL")" -ne "$DIR_TS" ]]; then
+    fail "metadata directory mtime mismatch"
 fi
 
 log "checking bad archive detection with truncated input"

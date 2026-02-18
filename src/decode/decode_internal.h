@@ -28,6 +28,7 @@ typedef struct RazeRar5FileHeader {
     uint64_t method;
     uint64_t unp_size;
     uint64_t pack_size;
+    uint64_t file_attr;
     uint64_t host_os;
     uint32_t unix_mtime;
     uint32_t crc32;

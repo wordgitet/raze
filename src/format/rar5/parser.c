@@ -5,6 +5,7 @@
 
 #include "../../decode/decode_internal.h"
 #include "block_reader.h"
+#include "file_header.h"
 #include "vint.h"
 
 #define RAZE_RAR5_HEAD_MAIN 1U
@@ -13,19 +14,8 @@
 #define RAZE_RAR5_HEAD_CRYPT 4U
 #define RAZE_RAR5_HEAD_ENDARC 5U
 
-#define RAZE_RAR5_HFL_SPLITBEFORE 0x0008U
-#define RAZE_RAR5_HFL_SPLITAFTER 0x0010U
-
 #define RAZE_RAR5_MHFL_VOLUME 0x0001U
 #define RAZE_RAR5_MHFL_SOLID 0x0004U
-
-#define RAZE_RAR5_FHFL_DIRECTORY 0x0001U
-#define RAZE_RAR5_FHFL_UTIME 0x0002U
-#define RAZE_RAR5_FHFL_CRC32 0x0004U
-#define RAZE_RAR5_FHFL_UNPUNKNOWN 0x0008U
-
-#define RAZE_RAR5_FCI_SOLID 0x00000040U
-#define RAZE_RAR5_FHEXTRA_CRYPT 0x01U
 
 static int skip_forward(FILE *file, uint64_t bytes) {
     while (bytes > 0) {
@@ -39,136 +29,6 @@ static int skip_forward(FILE *file, uint64_t bytes) {
             return 0;
         }
         bytes -= (uint64_t)chunk;
-    }
-    return 1;
-}
-
-static int parse_extra_has_crypt(const unsigned char *buf, size_t extra_len) {
-    size_t cursor = 0;
-
-    while (cursor < extra_len) {
-        uint64_t field_size = 0;
-        uint64_t field_type = 0;
-        size_t consumed = 0;
-        size_t next_pos;
-
-        if (!raze_vint_decode(buf + cursor, extra_len - cursor, &consumed, &field_size)) {
-            return 0;
-        }
-        cursor += consumed;
-        if (field_size == 0 || field_size > extra_len - cursor) {
-            return 0;
-        }
-
-        next_pos = cursor + (size_t)field_size;
-        if (!raze_vint_decode(buf + cursor, next_pos - cursor, &consumed, &field_type)) {
-            return 0;
-        }
-        cursor += consumed;
-
-        if (field_type == RAZE_RAR5_FHEXTRA_CRYPT) {
-            return 1;
-        }
-        cursor = next_pos;
-    }
-
-    return 0;
-}
-
-static int parse_file_like_header(
-    const RazeRar5BlockHeader *block,
-    const unsigned char *buf,
-    size_t buf_len,
-    RazeRar5Scan *scan
-) {
-    size_t cursor = block->body_offset;
-    size_t consumed = 0;
-    uint64_t file_flags = 0;
-    uint64_t comp_info = 0;
-    uint64_t name_len = 0;
-    uint64_t file_method = 0;
-    uint64_t dummy = 0;
-
-    if (!raze_vint_decode(buf + cursor, block->extra_offset - cursor, &consumed, &file_flags)) {
-        return 0;
-    }
-    cursor += consumed;
-
-    if (!raze_vint_decode(buf + cursor, block->extra_offset - cursor, &consumed, &dummy)) {
-        return 0;
-    }
-    cursor += consumed;
-
-    if (!raze_vint_decode(buf + cursor, block->extra_offset - cursor, &consumed, &dummy)) {
-        return 0;
-    }
-    cursor += consumed;
-
-    if ((file_flags & RAZE_RAR5_FHFL_UTIME) != 0) {
-        if (block->extra_offset - cursor < 4) {
-            return 0;
-        }
-        cursor += 4;
-    }
-
-    if ((file_flags & RAZE_RAR5_FHFL_CRC32) != 0) {
-        if (block->extra_offset - cursor < 4) {
-            return 0;
-        }
-        cursor += 4;
-    }
-
-    if (!raze_vint_decode(buf + cursor, block->extra_offset - cursor, &consumed, &comp_info)) {
-        return 0;
-    }
-    cursor += consumed;
-
-    if (!raze_vint_decode(buf + cursor, block->extra_offset - cursor, &consumed, &dummy)) {
-        return 0;
-    }
-    cursor += consumed;
-
-    if (!raze_vint_decode(buf + cursor, block->extra_offset - cursor, &consumed, &name_len)) {
-        return 0;
-    }
-    cursor += consumed;
-
-    if (name_len > block->extra_offset - cursor) {
-        return 0;
-    }
-    cursor += (size_t)name_len;
-
-    file_method = (comp_info >> 7U) & 0x7U;
-
-    if ((block->flags & (RAZE_RAR5_HFL_SPLITBEFORE | RAZE_RAR5_HFL_SPLITAFTER)) != 0) {
-        scan->has_split = 1;
-    }
-    if ((file_flags & RAZE_RAR5_FHFL_UNPUNKNOWN) != 0) {
-        scan->has_unknown_unp_size = 1;
-    }
-    if ((comp_info & RAZE_RAR5_FCI_SOLID) != 0) {
-        scan->has_solid = 1;
-    }
-    if (file_method != 0) {
-        scan->has_compressed_method = 1;
-    } else {
-        scan->store_file_count += 1;
-    }
-
-    if (block->header_type == RAZE_RAR5_HEAD_FILE &&
-        (file_flags & RAZE_RAR5_FHFL_DIRECTORY) == 0) {
-        scan->file_count += 1;
-    }
-
-    if (block->extra_size > 0) {
-        const unsigned char *extra_ptr = buf + block->extra_offset;
-        if (parse_extra_has_crypt(extra_ptr, (size_t)block->extra_size)) {
-            scan->has_encryption = 1;
-        }
-    }
-
-    if (cursor > buf_len) {
-        return 0;
     }
     return 1;
 }
@@ -249,13 +109,40 @@ RazeStatus rar5_scan_archive(const char *archive_path, RazeRar5Scan *scan) {
                 break;
             }
             case RAZE_RAR5_HEAD_FILE:
-            case RAZE_RAR5_HEAD_SERVICE:
-                if (!parse_file_like_header(&block, buf, buf_len, scan)) {
+            case RAZE_RAR5_HEAD_SERVICE: {
+                RazeRar5FileHeader fh;
+
+                if (!raze_rar5_parse_file_header(&block, buf, buf_len, &fh)) {
                     free(buf);
                     fclose(file);
                     return RAZE_STATUS_BAD_ARCHIVE;
                 }
+
+                if (fh.split_before || fh.split_after) {
+                    scan->has_split = 1;
+                }
+                if ((fh.file_flags & RAZE_RAR5_FHFL_UNPUNKNOWN) != 0) {
+                    scan->has_unknown_unp_size = 1;
+                }
+                if (fh.solid) {
+                    scan->has_solid = 1;
+                }
+                if (fh.method != 0) {
+                    scan->has_compressed_method = 1;
+                } else {
+                    scan->store_file_count += 1;
+                }
+                if (fh.encrypted) {
+                    scan->has_encryption = 1;
+                }
+
+                if (block.header_type == RAZE_RAR5_HEAD_FILE && !fh.is_dir) {
+                    scan->file_count += 1;
+                }
+
+                raze_rar5_file_header_free(&fh);
                 break;
+            }
             case RAZE_RAR5_HEAD_CRYPT:
                 scan->has_encryption = 1;
                 break;

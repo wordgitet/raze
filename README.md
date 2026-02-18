@@ -28,6 +28,15 @@ make
 ./raze x -opout corpus/local/archives/local_store.rar
 ```
 
+V1 extract-compatible switches (UnRAR-style subset):
+
+- `-op<path>` or `-op <path>`
+- `-o+`, `-o-`, `-y`
+- `-idq`, `-inul`
+- `-` (stop switch parsing)
+
+Unsupported switch forms are rejected with usage exit code `2`.
+
 ## Test and Bench
 
 ```sh
@@ -46,11 +55,20 @@ make corpus-fetch
 # Generate local RAR5 corpora using /usr/bin/rar.
 make corpus-local
 
+# Generate themed local corpora (audio/images/database/source-code mixes).
+make corpus-themed
+
 # Do both steps.
 make corpus
 ```
 
 Scripts detect already downloaded/generated artifacts and skip unnecessary work.
+
+## Metadata Behavior (V1)
+
+- Extraction is store-only and fail-fast on unsupported archive features.
+- `mtime` and mode are restored for files and directories when available.
+- Metadata apply errors are warnings (non-fatal), while data corruption and I/O errors remain fatal.
 
 ## UnRAR Compatibility Reference
 

@@ -53,19 +53,13 @@ static int parse_switch(
 ) {
     const char *arg = argv[*index];
 
-    if (strcmp(arg, "--overwrite") == 0 || strcmp(arg, "-y") == 0 || strcmp(arg, "-o+") == 0) {
+    if (strcmp(arg, "-y") == 0 || strcmp(arg, "-o+") == 0) {
         options->overwrite_mode = RAZE_OVERWRITE_ALWAYS;
         return 1;
     }
 
-    if (strcmp(arg, "--quiet") == 0 || strcmp(arg, "-inul") == 0 ||
-        (strncmp(arg, "-id", 3) == 0 && strstr(arg, "q") != 0)) {
+    if (strcmp(arg, "-inul") == 0 || strcmp(arg, "-idq") == 0) {
         options->quiet = 1;
-        return 1;
-    }
-
-    if (strcmp(arg, "--verbose") == 0) {
-        options->verbose = 1;
         return 1;
     }
 
@@ -101,7 +95,6 @@ int main(int argc, char **argv) {
     int scan_switches = 1;
     int have_explicit_output = 0;
     int is_extract = 0;
-    int is_list = 0;
     int list_technical = 0;
 
     if (argc == 2 && strcmp(argv[1], "--help") == 0) {
@@ -118,9 +111,7 @@ int main(int argc, char **argv) {
     if (strcmp(command, "x") == 0) {
         is_extract = 1;
     } else if (strcmp(command, "l") == 0) {
-        is_list = 1;
     } else if (strcmp(command, "lt") == 0) {
-        is_list = 1;
         list_technical = 1;
     } else {
         fprintf(stderr, "raze: unsupported command: %s\n", command);
@@ -137,12 +128,12 @@ int main(int argc, char **argv) {
         }
 
         if (scan_switches && arg[0] == '-' && arg[1] != '\0') {
-            if (!parse_switch(argc, argv, &i, &options, &output_dir)) {
+            if (!is_extract) {
                 fprintf(stderr, "raze: unsupported or invalid switch: %s\n", arg);
                 return 2;
             }
-            if (is_list && strncmp(arg, "-op", 3) == 0) {
-                fprintf(stderr, "raze: -op is only valid for extract command\n");
+            if (!parse_switch(argc, argv, &i, &options, &output_dir)) {
+                fprintf(stderr, "raze: unsupported or invalid switch: %s\n", arg);
                 return 2;
             }
             have_explicit_output = have_explicit_output || strncmp(arg, "-op", 3) == 0;
