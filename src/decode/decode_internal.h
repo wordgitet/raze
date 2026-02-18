@@ -36,6 +36,14 @@ typedef struct RazeRar5FileHeader {
     uint64_t host_os;
     uint32_t unix_mtime;
     uint32_t crc32;
+    unsigned char crypt_salt[16];
+    unsigned char crypt_initv[16];
+    unsigned char crypt_psw_check[8];
+    unsigned char crypt_psw_check_csum[4];
+    uint8_t crypt_lg2_count;
+    uint8_t crypt_version;
+    uint8_t crypt_use_psw_check;
+    uint8_t crypt_use_hash_key;
     int mtime_present;
     int crc32_present;
     int split_before;

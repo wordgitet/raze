@@ -92,14 +92,36 @@ static int build_file_header_payload(
     block->body_offset = 0U;
 
     if (add_crypt_extra) {
-        if (cursor + 2U > buf_cap) {
+        size_t extra_start = cursor;
+        size_t field_size_pos;
+        size_t payload_start;
+
+        if (cursor + 64U > buf_cap) {
             return 0;
         }
         block->flags = 0x0001U;
         block->extra_offset = cursor;
-        block->extra_size = 2U;
-        buf[cursor++] = 0x01U;
-        buf[cursor++] = 0x01U;
+
+        field_size_pos = cursor++;
+        if (!append_vint(buf, buf_cap, &cursor, 0x01U)) {
+            return 0;
+        }
+
+        payload_start = cursor;
+        if (!append_vint(buf, buf_cap, &cursor, 0U)) {
+            return 0;
+        }
+        if (!append_vint(buf, buf_cap, &cursor, 0U)) {
+            return 0;
+        }
+        buf[cursor++] = 15U;
+        memset(buf + cursor, 0x11, 16U);
+        cursor += 16U;
+        memset(buf + cursor, 0x22, 16U);
+        cursor += 16U;
+
+        buf[field_size_pos] = (unsigned char)(1U + (cursor - payload_start));
+        block->extra_size = cursor - extra_start;
     } else {
         block->extra_offset = cursor;
         block->extra_size = 0U;

@@ -6,6 +6,7 @@ ARCHIVE_STORE="$ROOT_DIR/corpus/local/archives/local_store.rar"
 ARCHIVE_FAST="$ROOT_DIR/corpus/local/archives/local_fast.rar"
 ARCHIVE_SOLID="$ROOT_DIR/corpus/local/archives/local_best_solid.rar"
 ARCHIVE_THEMATIC_FAST="$ROOT_DIR/corpus/local/thematic/archives/thematic_fast.rar"
+ARCHIVE_THEMATIC_SOLID="$ROOT_DIR/corpus/local/thematic/archives/thematic_best_solid.rar"
 SOURCE_DIR="$ROOT_DIR/corpus/local/source"
 THEMATIC_SOURCE_DIR="$ROOT_DIR/corpus/local/thematic/source"
 RAR_BIN="${RAR_BIN:-$(command -v rar || true)}"
@@ -62,6 +63,7 @@ log "ensuring local corpus exists"
 [[ -f "$ARCHIVE_FAST" ]] || fail "missing $ARCHIVE_FAST"
 [[ -f "$ARCHIVE_SOLID" ]] || fail "missing $ARCHIVE_SOLID"
 [[ -f "$ARCHIVE_THEMATIC_FAST" ]] || fail "missing $ARCHIVE_THEMATIC_FAST"
+[[ -f "$ARCHIVE_THEMATIC_SOLID" ]] || fail "missing $ARCHIVE_THEMATIC_SOLID"
 [[ -d "$SOURCE_DIR" ]] || fail "missing $SOURCE_DIR"
 [[ -d "$THEMATIC_SOURCE_DIR" ]] || fail "missing $THEMATIC_SOURCE_DIR"
 [[ -n "$RAR_BIN" ]] || fail "rar binary not found. Set RAR_BIN or install rar."
@@ -130,6 +132,7 @@ run_expect_exit 0 "$ROOT_DIR/raze" x -idq -o+ -op"$OUT_DIR" "$ARCHIVE_STORE"
 log "checking supported compatibility switches for extract"
 run_expect_exit 0 "$ROOT_DIR/raze" x -y -idq -op"$TMP_DIR/out_y" "$ARCHIVE_STORE"
 run_expect_exit 0 "$ROOT_DIR/raze" x -inul -o+ -op"$TMP_DIR/out_inul" "$ARCHIVE_STORE"
+run_expect_exit 0 "$ROOT_DIR/raze" x -idq -o+ -psecret -op"$TMP_DIR/out_p" "$ARCHIVE_STORE"
 
 log "checking -o switch compatibility (bare -o must be rejected)"
 run_expect_exit 2 "$ROOT_DIR/raze" x -idq -o "$ARCHIVE_STORE"
@@ -160,8 +163,114 @@ if [[ "$THEMATIC_SRC_HASH" != "$THEMATIC_DST_HASH" ]]; then
     fail "thematic compressed extraction hash mismatch"
 fi
 
-log "checking unsupported solid archive rejection"
-run_expect_exit 3 "$ROOT_DIR/raze" x -idq -op"$TMP_DIR/out_solid" "$ARCHIVE_SOLID"
+log "checking solid extraction path"
+run_expect_exit 0 "$ROOT_DIR/raze" x -idq -o+ -op"$TMP_DIR/out_solid" "$ARCHIVE_SOLID"
+SOLID_HASH="$(dir_hash "$TMP_DIR/out_solid")"
+if [[ "$SRC_HASH" != "$SOLID_HASH" ]]; then
+    fail "solid extraction hash mismatch"
+fi
+
+log "checking solid extraction path on thematic corpus"
+run_expect_exit 0 "$ROOT_DIR/raze" x -idq -o+ -op"$TMP_DIR/out_thematic_solid" "$ARCHIVE_THEMATIC_SOLID"
+THEMATIC_SOLID_HASH="$(dir_hash "$TMP_DIR/out_thematic_solid")"
+if [[ "$THEMATIC_SRC_HASH" != "$THEMATIC_SOLID_HASH" ]]; then
+    fail "thematic solid extraction hash mismatch"
+fi
+
+log "checking split multivolume extraction (.partN)"
+SPLIT_SRC_DIR="$TMP_DIR/split_src"
+SPLIT_OUT_DIR="$TMP_DIR/out_split"
+SPLIT_ARCHIVE="$TMP_DIR/split_fast.rar"
+mkdir -p "$SPLIT_SRC_DIR/dir"
+dd if=/dev/urandom of="$SPLIT_SRC_DIR/dir/blob.bin" bs=1K count=450 status=none
+printf 'split fixture text\n' > "$SPLIT_SRC_DIR/dir/readme.txt"
+(
+    cd "$SPLIT_SRC_DIR"
+    "$RAR_BIN" a -idq -ma5 -m1 -s- -v120k "$SPLIT_ARCHIVE" ./dir
+)
+mapfile -t SPLIT_PARTS < <(find "$TMP_DIR" -maxdepth 1 -type f -name 'split_fast.part*.rar' | sort -V)
+if [[ "${#SPLIT_PARTS[@]}" -lt 2 ]]; then
+    fail "split fixture did not produce multiple volumes"
+fi
+run_expect_exit 0 "$ROOT_DIR/raze" x -idq -o+ -op"$SPLIT_OUT_DIR" "$TMP_DIR/split_fast.part1.rar"
+if [[ "$(dir_hash "$SPLIT_SRC_DIR")" != "$(dir_hash "$SPLIT_OUT_DIR")" ]]; then
+    fail "split multivolume extraction hash mismatch"
+fi
+
+log "checking split+solid multivolume extraction"
+SPLIT_SOLID_SRC_DIR="$TMP_DIR/split_solid_src"
+SPLIT_SOLID_OUT_DIR="$TMP_DIR/out_split_solid"
+SPLIT_SOLID_ARCHIVE="$TMP_DIR/split_solid.rar"
+mkdir -p "$SPLIT_SOLID_SRC_DIR/alpha"
+for i in $(seq 1 500); do
+    printf 'solid-split-line-%04d repeated pattern for dictionary reuse\n' "$i" >> "$SPLIT_SOLID_SRC_DIR/alpha/data.txt"
+done
+dd if=/dev/urandom of="$SPLIT_SOLID_SRC_DIR/alpha/random.bin" bs=1K count=256 status=none
+(
+    cd "$SPLIT_SOLID_SRC_DIR"
+    "$RAR_BIN" a -idq -ma5 -m5 -s -v80k "$SPLIT_SOLID_ARCHIVE" ./alpha
+)
+run_expect_exit 0 "$ROOT_DIR/raze" x -idq -o+ -op"$SPLIT_SOLID_OUT_DIR" "$TMP_DIR/split_solid.part1.rar"
+if [[ "$(dir_hash "$SPLIT_SOLID_SRC_DIR")" != "$(dir_hash "$SPLIT_SOLID_OUT_DIR")" ]]; then
+    fail "split solid extraction hash mismatch"
+fi
+
+log "checking legacy .rar/.r00 chain handling"
+LEGACY_OUT_DIR="$TMP_DIR/out_legacy"
+cp "${SPLIT_PARTS[0]}" "$TMP_DIR/legacy_split.rar"
+for i in "${!SPLIT_PARTS[@]}"; do
+    if [[ "$i" -eq 0 ]]; then
+        continue
+    fi
+    suffix="$(printf '.r%02d' "$((i - 1))")"
+    cp "${SPLIT_PARTS[$i]}" "$TMP_DIR/legacy_split${suffix}"
+done
+run_expect_exit 0 "$ROOT_DIR/raze" x -idq -o+ -op"$LEGACY_OUT_DIR" "$TMP_DIR/legacy_split.rar"
+if [[ "$(dir_hash "$SPLIT_SRC_DIR")" != "$(dir_hash "$LEGACY_OUT_DIR")" ]]; then
+    fail "legacy volume chain extraction hash mismatch"
+fi
+
+log "checking missing split volume failure path"
+MISSING_FIRST="$TMP_DIR/missing.$(basename "${SPLIT_PARTS[0]}")"
+for part in "${SPLIT_PARTS[@]}"; do
+    cp "$part" "$TMP_DIR/missing.$(basename "$part")"
+done
+rm -f "$TMP_DIR/missing.split_fast.part2.rar"
+run_expect_exit 8 "$ROOT_DIR/raze" x -idq -o+ -op"$TMP_DIR/out_missing_split" "$MISSING_FIRST"
+
+log "checking encrypted data archive extraction (-p)"
+ENC_SRC_DIR="$TMP_DIR/enc_src"
+ENC_OUT_DIR="$TMP_DIR/out_enc"
+ENC_ARCHIVE="$TMP_DIR/encrypted_data.rar"
+mkdir -p "$ENC_SRC_DIR/secret"
+printf 'encrypted fixture text\n' > "$ENC_SRC_DIR/secret/a.txt"
+dd if=/dev/urandom of="$ENC_SRC_DIR/secret/b.bin" bs=1K count=16 status=none
+(
+    cd "$ENC_SRC_DIR"
+    "$RAR_BIN" a -idq -ma5 -m3 -s- -r -psecret "$ENC_ARCHIVE" ./secret
+)
+run_expect_exit 0 "$ROOT_DIR/raze" x -idq -o+ -psecret -op"$ENC_OUT_DIR" "$ENC_ARCHIVE"
+if [[ "$(dir_hash "$ENC_SRC_DIR")" != "$(dir_hash "$ENC_OUT_DIR")" ]]; then
+    fail "encrypted data extraction hash mismatch"
+fi
+run_expect_exit 6 "$ROOT_DIR/raze" x -idq -o+ -pwrong -op"$TMP_DIR/out_enc_wrong" "$ENC_ARCHIVE"
+run_expect_exit 2 "$ROOT_DIR/raze" x -idq -o+ -op"$TMP_DIR/out_enc_missing" "$ENC_ARCHIVE"
+run_expect_exit 2 "$ROOT_DIR/raze" x -idq -o+ -p -op"$TMP_DIR/out_enc_prompt_missing" "$ENC_ARCHIVE"
+
+log "checking encrypted headers archive extraction (-hp)"
+HENC_OUT_DIR="$TMP_DIR/out_henc"
+HENC_ARCHIVE="$TMP_DIR/encrypted_headers.rar"
+(
+    cd "$ENC_SRC_DIR"
+    "$RAR_BIN" a -idq -ma5 -m3 -s- -r -hpsecret "$HENC_ARCHIVE" ./secret
+)
+run_expect_exit 0 "$ROOT_DIR/raze" x -idq -o+ -psecret -op"$HENC_OUT_DIR" "$HENC_ARCHIVE"
+if [[ "$(dir_hash "$ENC_SRC_DIR")" != "$(dir_hash "$HENC_OUT_DIR")" ]]; then
+    fail "encrypted headers extraction hash mismatch"
+fi
+run_expect_exit 6 "$ROOT_DIR/raze" x -idq -o+ -pwrong -op"$TMP_DIR/out_henc_wrong" "$HENC_ARCHIVE"
+run_expect_exit 2 "$ROOT_DIR/raze" x -idq -o+ -op"$TMP_DIR/out_henc_missing" "$HENC_ARCHIVE"
+run_expect_exit 2 "$ROOT_DIR/raze" x -idq -o+ -p -op"$TMP_DIR/out_henc_prompt_missing" "$HENC_ARCHIVE"
 
 log "checking long archive path support (>1024 bytes)"
 LONG_SRC_DIR="$TMP_DIR/long_src"

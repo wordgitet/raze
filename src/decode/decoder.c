@@ -8,6 +8,8 @@ RazeExtractOptions raze_extract_options_default(void) {
     options.overwrite_mode = RAZE_OVERWRITE_DEFAULT;
     options.quiet = 0;
     options.verbose = 0;
+    options.password = 0;
+    options.password_present = 0;
     return options;
 }
 

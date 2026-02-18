@@ -7,6 +7,9 @@ Test suites for parser, decoder, and end-to-end extraction.
 - metadata mapping units (Unix/Windows mode mapping),
 - integration extraction/list scenarios,
 - compressed extraction parity checks on local and thematic corpora,
+- split/multivolume extraction checks (`.partN` and legacy `.r00` naming),
+- missing-volume failure behavior checks,
+- encrypted extraction checks (`-p` and `-hp`) including wrong/missing password paths,
 - long-path regression (>1024 bytes),
 - metadata restore checks (`mtime` + mode),
 - CLI compatibility subset checks and strict switch rejection.

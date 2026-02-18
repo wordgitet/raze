@@ -1,6 +1,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include <unistd.h>
 
 #include "raze/raze.h"
 
@@ -12,6 +13,7 @@ static void print_usage(const char *prog) {
     printf("\nSupported switches:\n");
     printf("  -op<path>   set output path\n");
     printf("  -o[+|-]     set overwrite mode (+ always, - never)\n");
+    printf("  -p[pass]    set password (-p prompts on tty)\n");
     printf("  -y          assume yes on all queries (same as -o+)\n");
     printf("  -idq        quiet messages\n");
     printf("  -inul       disable all messages\n");
@@ -49,7 +51,8 @@ static int parse_switch(
     char **argv,
     int *index,
     RazeExtractOptions *options,
-    const char **output_dir
+    const char **output_dir,
+    int *password_prompt
 ) {
     const char *arg = argv[*index];
 
@@ -81,7 +84,43 @@ static int parse_switch(
         return 1;
     }
 
+    if (strncmp(arg, "-p", 2) == 0) {
+        if (arg[2] != '\0') {
+            options->password = arg + 2;
+            options->password_present = 1;
+            return 1;
+        }
+        if (password_prompt != 0) {
+            *password_prompt = 1;
+        }
+        return 1;
+    }
+
     return 0;
+}
+
+static int prompt_password(char *buf, size_t buf_size) {
+    size_t len;
+
+    if (buf == 0 || buf_size < 2) {
+        return 0;
+    }
+    if (!isatty(STDIN_FILENO)) {
+        return 0;
+    }
+
+    fprintf(stderr, "Enter password: ");
+    fflush(stderr);
+    if (fgets(buf, (int)buf_size, stdin) == 0) {
+        return 0;
+    }
+
+    len = strlen(buf);
+    while (len > 0 && (buf[len - 1] == '\n' || buf[len - 1] == '\r')) {
+        buf[len - 1] = '\0';
+        len--;
+    }
+    return 1;
 }
 
 int main(int argc, char **argv) {
@@ -96,6 +135,8 @@ int main(int argc, char **argv) {
     int have_explicit_output = 0;
     int is_extract = 0;
     int list_technical = 0;
+    int password_prompt = 0;
+    char password_buf[1024];
 
     if (argc == 2 && strcmp(argv[1], "--help") == 0) {
         print_usage(argv[0]);
@@ -132,7 +173,7 @@ int main(int argc, char **argv) {
                 fprintf(stderr, "raze: unsupported or invalid switch: %s\n", arg);
                 return 2;
             }
-            if (!parse_switch(argc, argv, &i, &options, &output_dir)) {
+            if (!parse_switch(argc, argv, &i, &options, &output_dir, &password_prompt)) {
                 fprintf(stderr, "raze: unsupported or invalid switch: %s\n", arg);
                 return 2;
             }
@@ -158,6 +199,13 @@ int main(int argc, char **argv) {
     if (archive == 0) {
         fprintf(stderr, "raze: missing archive path\n");
         return 2;
+    }
+
+    if (is_extract && password_prompt && !options.password_present) {
+        if (prompt_password(password_buf, sizeof(password_buf))) {
+            options.password = password_buf;
+            options.password_present = 1;
+        }
     }
 
     status = raze_decoder_init(&decoder);

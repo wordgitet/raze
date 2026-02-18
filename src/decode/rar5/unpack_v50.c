@@ -2,11 +2,11 @@
 
 #include <limits.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "bit_reader.h"
 #include "filter.h"
-#include "huff.h"
 #include "window.h"
 
 #define RAZE_RAR5_MAX_LZ_MATCH 0x1001U
@@ -28,15 +28,8 @@ typedef struct RazeRar5BlockHeader {
 	int table_present;
 } RazeRar5BlockHeader;
 
-typedef struct RazeRar5BlockTables {
-	RazeRar5DecodeTable ld;
-	RazeRar5DecodeTable dd;
-	RazeRar5DecodeTable ldd;
-	RazeRar5DecodeTable rd;
-	RazeRar5DecodeTable bd;
-} RazeRar5BlockTables;
-
-static int read_bits_u32(RazeRar5BitReader *reader, unsigned int bits, uint32_t *value) {
+static int read_bits_u32(RazeRar5BitReader *reader, unsigned int bits, uint32_t *value)
+{
 	uint64_t temp;
 
 	if (!raze_rar5_br_read_bits(reader, bits, &temp)) {
@@ -46,7 +39,8 @@ static int read_bits_u32(RazeRar5BitReader *reader, unsigned int bits, uint32_t 
 	return 1;
 }
 
-static int read_filter_data(RazeRar5BitReader *reader, uint32_t *value) {
+static int read_filter_data(RazeRar5BitReader *reader, uint32_t *value)
+{
 	uint32_t byte_count;
 	uint32_t out = 0;
 	uint32_t i;
@@ -68,11 +62,8 @@ static int read_filter_data(RazeRar5BitReader *reader, uint32_t *value) {
 	return 1;
 }
 
-static int read_filter(
-	RazeRar5BitReader *reader,
-	size_t out_pos,
-	RazeRar5FilterQueue *queue
-) {
+static int read_filter(RazeRar5BitReader *reader, size_t out_pos, RazeRar5FilterQueue *queue)
+{
 	RazeRar5FilterOp op;
 	uint32_t rel_start;
 	uint32_t block_length;
@@ -104,7 +95,8 @@ static int read_filter(
 	return raze_rar5_filter_queue_push(queue, &op);
 }
 
-static uint32_t slot_to_length(RazeRar5BitReader *reader, uint32_t slot, int *ok) {
+static uint32_t slot_to_length(RazeRar5BitReader *reader, uint32_t slot, int *ok)
+{
 	uint32_t lbits;
 	uint32_t length = 2U;
 
@@ -129,14 +121,16 @@ static uint32_t slot_to_length(RazeRar5BitReader *reader, uint32_t slot, int *ok
 	return length;
 }
 
-static void insert_old_dist(size_t old_dist[4], size_t distance) {
+static void insert_old_dist(size_t old_dist[4], size_t distance)
+{
 	old_dist[3] = old_dist[2];
 	old_dist[2] = old_dist[1];
 	old_dist[1] = old_dist[0];
 	old_dist[0] = distance;
 }
 
-static int read_block_header(RazeRar5BitReader *reader, RazeRar5BlockHeader *header) {
+static int read_block_header(RazeRar5BitReader *reader, RazeRar5BlockHeader *header)
+{
 	uint32_t block_flags;
 	uint32_t saved_checksum;
 	uint32_t byte_count;
@@ -183,7 +177,8 @@ static int read_block_header(RazeRar5BitReader *reader, RazeRar5BlockHeader *hea
 	return 1;
 }
 
-static int past_block(const RazeRar5BitReader *reader, const RazeRar5BlockHeader *header) {
+static int past_block(const RazeRar5BitReader *reader, const RazeRar5BlockHeader *header)
+{
 	size_t block_end;
 
 	if (header->block_size == 0U) {
@@ -203,18 +198,17 @@ static int past_block(const RazeRar5BitReader *reader, const RazeRar5BlockHeader
 static int read_tables(
 	RazeRar5BitReader *reader,
 	const RazeRar5BlockHeader *header,
-	RazeRar5BlockTables *tables,
+	RazeRar5UnpackCtx *ctx,
 	int extra_dist
-) {
+)
+{
 	unsigned char bit_length[RAZE_RAR5_BC];
 	unsigned char table[RAZE_RAR5_HUFF_TABLE_SIZEX];
 	uint32_t table_size = extra_dist ? RAZE_RAR5_HUFF_TABLE_SIZEX : RAZE_RAR5_HUFF_TABLE_SIZEB;
 	uint32_t i;
 
-	(void)header;
-
 	if (!header->table_present) {
-		return 1;
+		return ctx->tables_ready;
 	}
 
 	for (i = 0; i < RAZE_RAR5_BC; ++i) {
@@ -241,11 +235,11 @@ static int read_tables(
 		}
 	}
 
-	raze_rar5_make_decode_tables(bit_length, &tables->bd, RAZE_RAR5_BC);
+	raze_rar5_make_decode_tables(bit_length, &ctx->bd, RAZE_RAR5_BC);
 
 	for (i = 0; i < table_size;) {
 		uint32_t number;
-		if (!raze_rar5_decode_number(reader, &tables->bd, &number)) {
+		if (!raze_rar5_decode_number(reader, &ctx->bd, &number)) {
 			return 0;
 		}
 		if (number < 16U) {
@@ -290,62 +284,196 @@ static int read_tables(
 		}
 	}
 
-	raze_rar5_make_decode_tables(&table[0], &tables->ld, RAZE_RAR5_NC);
-	raze_rar5_make_decode_tables(&table[RAZE_RAR5_NC], &tables->dd,
-		extra_dist ? RAZE_RAR5_DCX : RAZE_RAR5_DCB);
-	raze_rar5_make_decode_tables(&table[RAZE_RAR5_NC + (extra_dist ? RAZE_RAR5_DCX : RAZE_RAR5_DCB)],
-		&tables->ldd, RAZE_RAR5_LDC);
-	raze_rar5_make_decode_tables(&table[RAZE_RAR5_NC + (extra_dist ? RAZE_RAR5_DCX : RAZE_RAR5_DCB) + RAZE_RAR5_LDC],
-		&tables->rd, RAZE_RAR5_RC);
-
+	raze_rar5_make_decode_tables(&table[0], &ctx->ld, RAZE_RAR5_NC);
+	raze_rar5_make_decode_tables(
+		&table[RAZE_RAR5_NC],
+		&ctx->dd,
+		extra_dist ? RAZE_RAR5_DCX : RAZE_RAR5_DCB
+	);
+	raze_rar5_make_decode_tables(
+		&table[RAZE_RAR5_NC + (extra_dist ? RAZE_RAR5_DCX : RAZE_RAR5_DCB)],
+		&ctx->ldd,
+		RAZE_RAR5_LDC
+	);
+	raze_rar5_make_decode_tables(
+		&table[RAZE_RAR5_NC + (extra_dist ? RAZE_RAR5_DCX : RAZE_RAR5_DCB) + RAZE_RAR5_LDC],
+		&ctx->rd,
+		RAZE_RAR5_RC
+	);
+	ctx->tables_ready = 1;
 	return 1;
 }
 
-RazeStatus raze_rar5_unpack_v50(
+static int ensure_history_capacity(RazeRar5UnpackCtx *ctx, size_t need)
+{
+	unsigned char *expanded;
+
+	if (need <= ctx->history_capacity) {
+		return 1;
+	}
+	expanded = (unsigned char *)realloc(ctx->history, need);
+	if (expanded == 0) {
+		return 0;
+	}
+	ctx->history = expanded;
+	ctx->history_capacity = need;
+	return 1;
+}
+
+static void update_history(
+	RazeRar5UnpackCtx *ctx,
+	const unsigned char *data,
+	size_t data_size,
+	size_t dict_size
+)
+{
+	size_t keep;
+
+	if (dict_size == 0U || data == 0 || data_size == 0U) {
+		ctx->history_size = 0U;
+		ctx->dict_size = dict_size;
+		return;
+	}
+
+	keep = data_size < dict_size ? data_size : dict_size;
+	if (!ensure_history_capacity(ctx, keep)) {
+		ctx->history_size = 0U;
+		ctx->dict_size = dict_size;
+		return;
+	}
+
+	memcpy(ctx->history, data + (data_size - keep), keep);
+	ctx->history_size = keep;
+	ctx->dict_size = dict_size;
+}
+
+void raze_rar5_unpack_ctx_reset_for_new_stream(RazeRar5UnpackCtx *ctx)
+{
+	uint32_t i;
+
+	if (ctx == 0) {
+		return;
+	}
+
+	ctx->tables_ready = 0;
+	memset(&ctx->ld, 0, sizeof(ctx->ld));
+	memset(&ctx->dd, 0, sizeof(ctx->dd));
+	memset(&ctx->ldd, 0, sizeof(ctx->ldd));
+	memset(&ctx->rd, 0, sizeof(ctx->rd));
+	memset(&ctx->bd, 0, sizeof(ctx->bd));
+	for (i = 0; i < 4U; ++i) {
+		ctx->old_dist[i] = SIZE_MAX;
+	}
+	ctx->last_length = 0U;
+	ctx->history_size = 0U;
+	ctx->dict_size = 0U;
+	ctx->extra_dist = 0;
+	ctx->solid_initialized = 0;
+}
+
+void raze_rar5_unpack_ctx_init(RazeRar5UnpackCtx *ctx)
+{
+	if (ctx == 0) {
+		return;
+	}
+
+	memset(ctx, 0, sizeof(*ctx));
+	raze_rar5_unpack_ctx_reset_for_new_stream(ctx);
+}
+
+void raze_rar5_unpack_ctx_free(RazeRar5UnpackCtx *ctx)
+{
+	if (ctx == 0) {
+		return;
+	}
+
+	free(ctx->history);
+	ctx->history = 0;
+	ctx->history_size = 0;
+	ctx->history_capacity = 0;
+	raze_rar5_unpack_ctx_reset_for_new_stream(ctx);
+}
+
+RazeStatus raze_rar5_unpack_ctx_decode_file(
+	RazeRar5UnpackCtx *ctx,
 	const unsigned char *packed,
 	size_t packed_size,
 	unsigned char *output,
 	size_t output_size,
-	int extra_dist
-) {
+	size_t dict_size,
+	int extra_dist,
+	int solid
+)
+{
 	RazeRar5BitReader reader;
 	RazeRar5BlockHeader block;
-	RazeRar5BlockTables tables;
 	RazeRar5Window window;
 	RazeRar5FilterQueue filter_queue;
-	size_t old_dist[4];
-	uint32_t last_length = 0;
-	int tables_read = 0;
+	size_t prefix_len = 0U;
+	size_t window_size = 0U;
 	int file_done = 0;
 	int unsupported_filter = 0;
-	uint32_t i;
+	RazeStatus status = RAZE_STATUS_OK;
 
-	if (packed == 0 || output == 0) {
+	if (ctx == 0 || packed == 0 || output == 0) {
 		return RAZE_STATUS_BAD_ARGUMENT;
 	}
 
-	if (!raze_rar5_window_init(&window, output_size)) {
+	if (!solid) {
+		raze_rar5_unpack_ctx_reset_for_new_stream(ctx);
+	} else if (!ctx->solid_initialized) {
+		raze_rar5_unpack_ctx_reset_for_new_stream(ctx);
+	} else {
+		if (ctx->extra_dist != extra_dist) {
+			raze_rar5_unpack_ctx_reset_for_new_stream(ctx);
+			return RAZE_STATUS_BAD_ARCHIVE;
+		}
+		if (ctx->dict_size != 0U && dict_size != 0U && ctx->dict_size != dict_size) {
+			raze_rar5_unpack_ctx_reset_for_new_stream(ctx);
+			return RAZE_STATUS_BAD_ARCHIVE;
+		}
+	}
+
+	if (solid && ctx->solid_initialized && dict_size > 0U) {
+		prefix_len = ctx->history_size < dict_size ? ctx->history_size : dict_size;
+	}
+	if (output_size > SIZE_MAX - prefix_len) {
+		raze_rar5_unpack_ctx_reset_for_new_stream(ctx);
+		return RAZE_STATUS_BAD_ARCHIVE;
+	}
+	window_size = prefix_len + output_size;
+
+	if (packed_size == 0U && output_size == 0U) {
+		if (solid) {
+			update_history(ctx, ctx->history, ctx->history_size, dict_size);
+			ctx->extra_dist = extra_dist;
+			ctx->solid_initialized = 1;
+		}
+		return RAZE_STATUS_OK;
+	}
+	if (packed_size == 0U || (output_size > 0U && window_size == prefix_len)) {
+		raze_rar5_unpack_ctx_reset_for_new_stream(ctx);
+		return RAZE_STATUS_BAD_ARCHIVE;
+	}
+
+	if (!raze_rar5_window_init(&window, window_size)) {
 		return RAZE_STATUS_IO;
 	}
+	if (prefix_len > 0U) {
+		memcpy(window.data, ctx->history + (ctx->history_size - prefix_len), prefix_len);
+	}
+	window.pos = prefix_len;
 
 	raze_rar5_filter_queue_init(&filter_queue);
-	for (i = 0; i < 4U; ++i) {
-		old_dist[i] = SIZE_MAX;
-	}
-	memset(&tables, 0, sizeof(tables));
-
 	raze_rar5_br_init(&reader, packed, packed_size);
 	if (!read_block_header(&reader, &block)) {
-		raze_rar5_filter_queue_free(&filter_queue);
-		raze_rar5_window_free(&window);
-		return RAZE_STATUS_BAD_ARCHIVE;
+		status = RAZE_STATUS_BAD_ARCHIVE;
+		goto done;
 	}
-	if (!read_tables(&reader, &block, &tables, extra_dist)) {
-		raze_rar5_filter_queue_free(&filter_queue);
-		raze_rar5_window_free(&window);
-		return RAZE_STATUS_BAD_ARCHIVE;
+	if (!read_tables(&reader, &block, ctx, extra_dist)) {
+		status = RAZE_STATUS_BAD_ARCHIVE;
+		goto done;
 	}
-	tables_read = 1;
 
 	while (window.pos < window.size) {
 		while (past_block(&reader, &block)) {
@@ -354,39 +482,33 @@ RazeStatus raze_rar5_unpack_v50(
 				break;
 			}
 			if (!read_block_header(&reader, &block)) {
-				raze_rar5_filter_queue_free(&filter_queue);
-				raze_rar5_window_free(&window);
-				return RAZE_STATUS_BAD_ARCHIVE;
+				status = RAZE_STATUS_BAD_ARCHIVE;
+				goto done;
 			}
-			if (!read_tables(&reader, &block, &tables, extra_dist)) {
-				raze_rar5_filter_queue_free(&filter_queue);
-				raze_rar5_window_free(&window);
-				return RAZE_STATUS_BAD_ARCHIVE;
+			if (!read_tables(&reader, &block, ctx, extra_dist)) {
+				status = RAZE_STATUS_BAD_ARCHIVE;
+				goto done;
 			}
-			tables_read = 1;
 		}
 		if (file_done) {
 			break;
 		}
-		if (!tables_read) {
-			raze_rar5_filter_queue_free(&filter_queue);
-			raze_rar5_window_free(&window);
-			return RAZE_STATUS_BAD_ARCHIVE;
+		if (!ctx->tables_ready) {
+			status = RAZE_STATUS_BAD_ARCHIVE;
+			goto done;
 		}
 
 		{
 			uint32_t main_slot;
-			if (!raze_rar5_decode_number(&reader, &tables.ld, &main_slot)) {
-				raze_rar5_filter_queue_free(&filter_queue);
-				raze_rar5_window_free(&window);
-				return RAZE_STATUS_BAD_ARCHIVE;
+			if (!raze_rar5_decode_number(&reader, &ctx->ld, &main_slot)) {
+				status = RAZE_STATUS_BAD_ARCHIVE;
+				goto done;
 			}
 
 			if (main_slot < 256U) {
 				if (!raze_rar5_window_put_literal(&window, (unsigned char)main_slot)) {
-					raze_rar5_filter_queue_free(&filter_queue);
-					raze_rar5_window_free(&window);
-					return RAZE_STATUS_BAD_ARCHIVE;
+					status = RAZE_STATUS_BAD_ARCHIVE;
+					goto done;
 				}
 				continue;
 			}
@@ -399,14 +521,12 @@ RazeStatus raze_rar5_unpack_v50(
 				uint32_t dbits;
 
 				if (!ok) {
-					raze_rar5_filter_queue_free(&filter_queue);
-					raze_rar5_window_free(&window);
-					return RAZE_STATUS_BAD_ARCHIVE;
+					status = RAZE_STATUS_BAD_ARCHIVE;
+					goto done;
 				}
-				if (!raze_rar5_decode_number(&reader, &tables.dd, &dist_slot)) {
-					raze_rar5_filter_queue_free(&filter_queue);
-					raze_rar5_window_free(&window);
-					return RAZE_STATUS_BAD_ARCHIVE;
+				if (!raze_rar5_decode_number(&reader, &ctx->dd, &dist_slot)) {
+					status = RAZE_STATUS_BAD_ARCHIVE;
+					goto done;
 				}
 
 				if (dist_slot < 4U) {
@@ -422,28 +542,25 @@ RazeStatus raze_rar5_unpack_v50(
 						if (dbits > 4U) {
 							uint32_t upper;
 							if (!read_bits_u32(&reader, dbits - 4U, &upper)) {
-								raze_rar5_filter_queue_free(&filter_queue);
-								raze_rar5_window_free(&window);
-								return RAZE_STATUS_BAD_ARCHIVE;
+								status = RAZE_STATUS_BAD_ARCHIVE;
+								goto done;
 							}
 							distance += ((size_t)upper << 4U);
 						}
 
 						{
 							uint32_t low_dist;
-							if (!raze_rar5_decode_number(&reader, &tables.ldd, &low_dist)) {
-								raze_rar5_filter_queue_free(&filter_queue);
-								raze_rar5_window_free(&window);
-								return RAZE_STATUS_BAD_ARCHIVE;
+							if (!raze_rar5_decode_number(&reader, &ctx->ldd, &low_dist)) {
+								status = RAZE_STATUS_BAD_ARCHIVE;
+								goto done;
 							}
 							distance += low_dist;
 						}
 					} else {
 						uint32_t lower;
 						if (!read_bits_u32(&reader, dbits, &lower)) {
-							raze_rar5_filter_queue_free(&filter_queue);
-							raze_rar5_window_free(&window);
-							return RAZE_STATUS_BAD_ARCHIVE;
+							status = RAZE_STATUS_BAD_ARCHIVE;
+							goto done;
 						}
 						distance += lower;
 					}
@@ -459,31 +576,29 @@ RazeStatus raze_rar5_unpack_v50(
 					}
 				}
 
-				insert_old_dist(old_dist, distance);
-				last_length = length;
+				insert_old_dist(ctx->old_dist, distance);
+				ctx->last_length = length;
 				if (!raze_rar5_window_copy_match(&window, length, distance)) {
-					raze_rar5_filter_queue_free(&filter_queue);
-					raze_rar5_window_free(&window);
-					return RAZE_STATUS_BAD_ARCHIVE;
+					status = RAZE_STATUS_BAD_ARCHIVE;
+					goto done;
 				}
 				continue;
 			}
 
 			if (main_slot == 256U) {
-				if (!read_filter(&reader, window.pos, &filter_queue)) {
-					raze_rar5_filter_queue_free(&filter_queue);
-					raze_rar5_window_free(&window);
-					return RAZE_STATUS_BAD_ARCHIVE;
+				size_t file_pos = window.pos >= prefix_len ? window.pos - prefix_len : 0U;
+				if (!read_filter(&reader, file_pos, &filter_queue)) {
+					status = RAZE_STATUS_BAD_ARCHIVE;
+					goto done;
 				}
 				continue;
 			}
 
 			if (main_slot == 257U) {
-				if (last_length != 0U) {
-					if (!raze_rar5_window_copy_match(&window, last_length, old_dist[0])) {
-						raze_rar5_filter_queue_free(&filter_queue);
-						raze_rar5_window_free(&window);
-						return RAZE_STATUS_BAD_ARCHIVE;
+				if (ctx->last_length != 0U) {
+					if (!raze_rar5_window_copy_match(&window, ctx->last_length, ctx->old_dist[0])) {
+						status = RAZE_STATUS_BAD_ARCHIVE;
+						goto done;
 					}
 				}
 				continue;
@@ -491,63 +606,96 @@ RazeStatus raze_rar5_unpack_v50(
 
 			if (main_slot < 262U) {
 				uint32_t dist_num = main_slot - 258U;
-				size_t distance = old_dist[dist_num];
+				size_t distance = ctx->old_dist[dist_num];
 				uint32_t length_slot;
 				uint32_t length;
 				int ok;
 				size_t j;
 
 				for (j = dist_num; j > 0U; --j) {
-					old_dist[j] = old_dist[j - 1U];
+					ctx->old_dist[j] = ctx->old_dist[j - 1U];
 				}
-				old_dist[0] = distance;
+				ctx->old_dist[0] = distance;
 
-				if (!raze_rar5_decode_number(&reader, &tables.rd, &length_slot)) {
-					raze_rar5_filter_queue_free(&filter_queue);
-					raze_rar5_window_free(&window);
-					return RAZE_STATUS_BAD_ARCHIVE;
+				if (!raze_rar5_decode_number(&reader, &ctx->rd, &length_slot)) {
+					status = RAZE_STATUS_BAD_ARCHIVE;
+					goto done;
 				}
 				length = slot_to_length(&reader, length_slot, &ok);
 				if (!ok) {
-					raze_rar5_filter_queue_free(&filter_queue);
-					raze_rar5_window_free(&window);
-					return RAZE_STATUS_BAD_ARCHIVE;
+					status = RAZE_STATUS_BAD_ARCHIVE;
+					goto done;
 				}
 
-				last_length = length;
+				ctx->last_length = length;
 				if (!raze_rar5_window_copy_match(&window, length, distance)) {
-					raze_rar5_filter_queue_free(&filter_queue);
-					raze_rar5_window_free(&window);
-					return RAZE_STATUS_BAD_ARCHIVE;
+					status = RAZE_STATUS_BAD_ARCHIVE;
+					goto done;
 				}
 				continue;
 			}
 
-			raze_rar5_filter_queue_free(&filter_queue);
-			raze_rar5_window_free(&window);
-			return RAZE_STATUS_BAD_ARCHIVE;
+			status = RAZE_STATUS_BAD_ARCHIVE;
+			goto done;
 		}
 	}
 
 	if (window.pos != window.size) {
-		raze_rar5_filter_queue_free(&filter_queue);
-		raze_rar5_window_free(&window);
-		return RAZE_STATUS_BAD_ARCHIVE;
+		status = RAZE_STATUS_BAD_ARCHIVE;
+		goto done;
 	}
 
-	if (!raze_rar5_apply_filters(window.data, window.size, &filter_queue, &unsupported_filter)) {
-		raze_rar5_filter_queue_free(&filter_queue);
+	if (output_size > 0U) {
+		memcpy(output, window.data + prefix_len, output_size);
+	}
+	if (!raze_rar5_apply_filters(output, output_size, &filter_queue, &unsupported_filter)) {
 		if (unsupported_filter) {
-			raze_rar5_window_free(&window);
-			return RAZE_STATUS_UNSUPPORTED_FEATURE;
+			status = RAZE_STATUS_UNSUPPORTED_FEATURE;
+		} else {
+			status = RAZE_STATUS_BAD_ARCHIVE;
 		}
-		raze_rar5_window_free(&window);
-		return RAZE_STATUS_BAD_ARCHIVE;
+		goto done;
 	}
 
-	memcpy(output, window.data, window.size);
+	if (solid) {
+		update_history(ctx, window.data, window.size, dict_size);
+		ctx->extra_dist = extra_dist;
+		ctx->solid_initialized = 1;
+	} else {
+		ctx->solid_initialized = 0;
+	}
 
+done:
 	raze_rar5_filter_queue_free(&filter_queue);
 	raze_rar5_window_free(&window);
-	return RAZE_STATUS_OK;
+	if (status != RAZE_STATUS_OK) {
+		raze_rar5_unpack_ctx_reset_for_new_stream(ctx);
+	}
+	return status;
+}
+
+RazeStatus raze_rar5_unpack_v50(
+	const unsigned char *packed,
+	size_t packed_size,
+	unsigned char *output,
+	size_t output_size,
+	int extra_dist
+)
+{
+	RazeRar5UnpackCtx ctx;
+	RazeStatus status;
+
+	raze_rar5_unpack_ctx_init(&ctx);
+	status = raze_rar5_unpack_ctx_decode_file(
+		&ctx,
+		packed,
+		packed_size,
+		output,
+		output_size,
+		0U,
+		extra_dist,
+		0
+	);
+	raze_rar5_unpack_ctx_free(&ctx);
+	return status;
 }

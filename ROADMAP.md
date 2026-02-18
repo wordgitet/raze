@@ -66,14 +66,14 @@ Build a fast, modular RAR5 decompressor in C with measurable performance wins an
 - Correct extraction across mixed real-world RAR5 samples.
 - Byte-for-byte output matches `unrar` results.
 
-## Phase 4: Feature Completeness (Prioritized)
+## Phase 4: Feature Completeness (Prioritized) - IN PROGRESS
 
 ### Deliverables
 
-- Solid archive handling.
-- Multivolume support.
-- Optional encrypted archive support (if in scope).
-- Better error handling and diagnostics.
+- Solid archive handling. - DONE
+- Multivolume support. - DONE
+- Optional encrypted archive support (if in scope). - DONE
+- Better error handling and diagnostics. - IN PROGRESS
 
 ### Exit Criteria
 
@@ -108,6 +108,6 @@ Build a fast, modular RAR5 decompressor in C with measurable performance wins an
 
 ## Immediate Next Steps
 
-1. Start `Phase 4` scope selection (solid, multivolume, encryption ordering).
-2. Optimize compressed decode hotspots using `bench-compressed` data.
-3. Add more corruption/fuzz coverage around compressed block parsing.
+1. Run and tune `bench-solid`, `bench-split`, and `bench-encrypted` versus `unrar` (target <=10% gap).
+2. Add more corruption/fuzz coverage around split/solid/encrypted transitions.
+3. Improve extraction diagnostics while preserving deterministic status codes.

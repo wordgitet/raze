@@ -2,6 +2,14 @@ CC := cc
 CFLAGS := -std=c11 -O2 -Wall -Wextra -Wpedantic -MMD -MP -Iinclude
 LDFLAGS :=
 
+OPENSSL_CFLAGS := $(shell pkg-config --cflags openssl 2>/dev/null)
+OPENSSL_LIBS := $(shell pkg-config --libs openssl 2>/dev/null)
+
+ifneq ($(strip $(OPENSSL_LIBS)),)
+CFLAGS += $(OPENSSL_CFLAGS) -DRAZE_HAVE_OPENSSL=1
+LDFLAGS += $(OPENSSL_LIBS)
+endif
+
 TARGET := raze
 BUILD_DIR := build
 ISAL_DIR := third_party/isa-l
@@ -18,7 +26,7 @@ SRCS := $(shell find src -type f -name '*.c' | sort)
 OBJS := $(patsubst %.c,$(BUILD_DIR)/%.o,$(SRCS))
 DEPS := $(OBJS:.o=.d)
 
-.PHONY: all clean run test bench-store bench-compressed corpus corpus-fetch corpus-local corpus-themed
+.PHONY: all clean run test bench-store bench-compressed bench-solid bench-split bench-encrypted corpus corpus-fetch corpus-local corpus-themed
 
 all: $(TARGET)
 
@@ -43,6 +51,15 @@ bench-store: $(TARGET)
 
 bench-compressed: $(TARGET)
 	./bench/bench_compressed.sh
+
+bench-solid: $(TARGET)
+	./bench/bench_solid.sh
+
+bench-split: $(TARGET)
+	./bench/bench_split.sh
+
+bench-encrypted: $(TARGET)
+	./bench/bench_encrypted.sh
 
 corpus-fetch:
 	./scripts/corpus_fetch.sh
