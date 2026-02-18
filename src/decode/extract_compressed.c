@@ -2,9 +2,56 @@
 
 #include <limits.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include "../checksum/crc32.h"
 #include "rar5/unpack_v50.h"
+
+void raze_compressed_scratch_init(RazeCompressedScratch *scratch)
+{
+	if (scratch == 0) {
+		return;
+	}
+
+	scratch->packed = 0;
+	scratch->packed_capacity = 0;
+	scratch->unpacked = 0;
+	scratch->unpacked_capacity = 0;
+}
+
+void raze_compressed_scratch_free(RazeCompressedScratch *scratch)
+{
+	if (scratch == 0) {
+		return;
+	}
+
+	free(scratch->packed);
+	free(scratch->unpacked);
+	scratch->packed = 0;
+	scratch->packed_capacity = 0;
+	scratch->unpacked = 0;
+	scratch->unpacked_capacity = 0;
+}
+
+static int ensure_scratch_capacity(unsigned char **buf, size_t *capacity, size_t need)
+{
+	unsigned char *expanded;
+
+	if (buf == 0 || capacity == 0) {
+		return 0;
+	}
+	if (*capacity >= need) {
+		return 1;
+	}
+
+	expanded = (unsigned char *)realloc(*buf, need);
+	if (expanded == 0) {
+		return 0;
+	}
+	*buf = expanded;
+	*capacity = need;
+	return 1;
+}
 
 static RazeStatus read_exact_payload(FILE *archive, unsigned char *buf, size_t size)
 {
@@ -24,56 +71,60 @@ static RazeStatus read_exact_payload(FILE *archive, unsigned char *buf, size_t s
 	return RAZE_STATUS_OK;
 }
 
-static RazeStatus write_exact_payload(FILE *output, const unsigned char *buf, size_t size)
+static RazeStatus write_exact_payload(
+	FILE *output,
+	const unsigned char *buf,
+	size_t size,
+	int crc32_present,
+	uint32_t expected_crc32
+)
 {
 	size_t offset = 0;
+	uint32_t crc = raze_crc32_init();
 
 	while (offset < size) {
 		size_t nwritten = fwrite(buf + offset, 1, size - offset, output);
 		if (nwritten == 0) {
 			return RAZE_STATUS_IO;
 		}
+		if (crc32_present) {
+			crc = raze_crc32_update(crc, buf + offset, nwritten);
+		}
 		offset += nwritten;
+	}
+
+	if (crc32_present && raze_crc32_final(crc) != expected_crc32) {
+		return RAZE_STATUS_CRC_MISMATCH;
 	}
 
 	return RAZE_STATUS_OK;
 }
 
-static RazeStatus verify_crc32(
-	const RazeRar5FileHeader *fh,
-	const unsigned char *data,
-	size_t data_size
-)
+static RazeStatus verify_empty_crc32(uint32_t expected_crc)
 {
-	uint32_t crc;
-	uint32_t actual;
+	uint32_t crc = raze_crc32_init();
+	uint32_t actual = raze_crc32_final(crc);
 
-	if (fh == 0 || data == 0) {
-		return RAZE_STATUS_BAD_ARGUMENT;
-	}
-	if (!fh->crc32_present) {
-		return RAZE_STATUS_OK;
-	}
-
-	crc = raze_crc32_init();
-	crc = raze_crc32_update(crc, data, data_size);
-	actual = raze_crc32_final(crc);
-
-	if (actual != fh->crc32) {
+	if (actual != expected_crc) {
 		return RAZE_STATUS_CRC_MISMATCH;
 	}
+
 	return RAZE_STATUS_OK;
 }
 
 RazeStatus raze_extract_compressed_payload(
 	FILE *archive,
 	FILE *output,
-	const RazeRar5FileHeader *fh
+	const RazeRar5FileHeader *fh,
+	RazeCompressedScratch *scratch
 )
 {
 	unsigned char *packed = 0;
 	unsigned char *unpacked = 0;
+	unsigned char *local_packed = 0;
+	unsigned char *local_unpacked = 0;
 	size_t packed_size;
+	size_t packed_alloc_size;
 	size_t unpacked_size;
 	int extra_dist = 0;
 	RazeStatus status = RAZE_STATUS_OK;
@@ -93,29 +144,49 @@ RazeStatus raze_extract_compressed_payload(
 
 	packed_size = (size_t)fh->pack_size;
 	unpacked_size = (size_t)fh->unp_size;
+	if (packed_size > SIZE_MAX - 8U) {
+		return RAZE_STATUS_UNSUPPORTED_FEATURE;
+	}
+	packed_alloc_size = packed_size + 8U;
 
 	if (packed_size == 0 && unpacked_size == 0) {
-		return verify_crc32(fh, (const unsigned char *)"", 0);
+		if (fh->crc32_present) {
+			return verify_empty_crc32(fh->crc32);
+		}
+		return RAZE_STATUS_OK;
 	}
 	if (packed_size == 0 || unpacked_size == 0) {
 		return RAZE_STATUS_BAD_ARCHIVE;
 	}
 
-	packed = (unsigned char *)malloc(packed_size);
-	if (packed == 0) {
-		return RAZE_STATUS_IO;
-	}
-
-	unpacked = (unsigned char *)malloc(unpacked_size);
-	if (unpacked == 0) {
-		free(packed);
-		return RAZE_STATUS_IO;
+	if (scratch != 0) {
+		if (!ensure_scratch_capacity(&scratch->packed, &scratch->packed_capacity, packed_alloc_size)) {
+			return RAZE_STATUS_IO;
+		}
+		if (!ensure_scratch_capacity(&scratch->unpacked, &scratch->unpacked_capacity, unpacked_size)) {
+			return RAZE_STATUS_IO;
+		}
+		packed = scratch->packed;
+		unpacked = scratch->unpacked;
+	} else {
+		local_packed = (unsigned char *)malloc(packed_alloc_size);
+		if (local_packed == 0) {
+			return RAZE_STATUS_IO;
+		}
+		local_unpacked = (unsigned char *)malloc(unpacked_size);
+		if (local_unpacked == 0) {
+			free(local_packed);
+			return RAZE_STATUS_IO;
+		}
+		packed = local_packed;
+		unpacked = local_unpacked;
 	}
 
 	status = read_exact_payload(archive, packed, packed_size);
 	if (status != RAZE_STATUS_OK) {
 		goto done;
 	}
+	memset(packed + packed_size, 0, 8U);
 
 	if (fh->comp_version == 1 && !fh->comp_is_v50_compat) {
 		extra_dist = 1;
@@ -132,15 +203,16 @@ RazeStatus raze_extract_compressed_payload(
 		goto done;
 	}
 
-	status = verify_crc32(fh, unpacked, unpacked_size);
-	if (status != RAZE_STATUS_OK) {
-		goto done;
-	}
-
-	status = write_exact_payload(output, unpacked, unpacked_size);
+	status = write_exact_payload(
+		output,
+		unpacked,
+		unpacked_size,
+		fh->crc32_present,
+		fh->crc32
+	);
 
 done:
-	free(unpacked);
-	free(packed);
+	free(local_unpacked);
+	free(local_packed);
 	return status;
 }

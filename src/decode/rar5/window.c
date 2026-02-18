@@ -51,8 +51,10 @@ int raze_rar5_window_copy_match(
 	size_t length,
 	size_t distance
 ) {
-	size_t src;
-	size_t i;
+	unsigned char *dst;
+	const unsigned char *src;
+	size_t copied;
+	size_t remaining = length;
 
 	if (window == 0 || window->data == 0 || window->pos > window->size) {
 		return 0;
@@ -67,12 +69,35 @@ int raze_rar5_window_copy_match(
 		return 1;
 	}
 
-	src = window->pos - distance;
-	for (i = 0; i < length; ++i) {
-		window->data[window->pos] = window->data[src];
-		window->pos += 1;
-		src += 1;
+	dst = window->data + window->pos;
+	src = dst - distance;
+
+	if (distance == 1U) {
+		memset(dst, src[0], length);
+		window->pos += length;
+		return 1;
 	}
 
+	if (distance >= length) {
+		memcpy(dst, src, length);
+		window->pos += length;
+		return 1;
+	}
+
+	memcpy(dst, src, distance);
+	copied = distance;
+	remaining -= distance;
+
+	while (remaining > 0U) {
+		size_t chunk = copied;
+		if (chunk > remaining) {
+			chunk = remaining;
+		}
+		memcpy(dst + copied, dst, chunk);
+		copied += chunk;
+		remaining -= chunk;
+	}
+
+	window->pos += length;
 	return 1;
 }

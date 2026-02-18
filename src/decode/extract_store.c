@@ -234,7 +234,8 @@ static RazeStatus copy_store_payload(
 static RazeStatus decode_payload(
 	FILE *archive,
 	FILE *output,
-	const RazeRar5FileHeader *fh
+	const RazeRar5FileHeader *fh,
+	RazeCompressedScratch *scratch
 )
 {
 	if (archive == 0 || output == 0 || fh == 0) {
@@ -251,7 +252,7 @@ static RazeStatus decode_payload(
 		);
 	}
 
-	return raze_extract_compressed_payload(archive, output, fh);
+	return raze_extract_compressed_payload(archive, output, fh, scratch);
 }
 
 static RazeStatus handle_file_block(
@@ -262,7 +263,8 @@ static RazeStatus handle_file_block(
     const char *output_dir,
     const RazeExtractOptions *options,
     RazeOverwritePrompt *prompt,
-    PendingDirMetaList *pending_dirs
+    PendingDirMetaList *pending_dirs,
+    RazeCompressedScratch *scratch
 ) {
     RazeRar5FileHeader fh;
     struct stat st;
@@ -374,7 +376,7 @@ static RazeStatus handle_file_block(
         goto done;
     }
 
-    status = decode_payload(archive, output, &fh);
+    status = decode_payload(archive, output, &fh, scratch);
     if (fclose(output) != 0 && status == RAZE_STATUS_OK) {
         status = RAZE_STATUS_IO;
     }
@@ -407,6 +409,7 @@ RazeStatus raze_extract_store_archive(
     FILE *file;
     RazeOverwritePrompt prompt;
     PendingDirMetaList pending_dirs;
+    RazeCompressedScratch compressed_scratch;
     RazeExtractOptions local_options;
     int saw_main = 0;
     int saw_end = 0;
@@ -414,6 +417,7 @@ RazeStatus raze_extract_store_archive(
     RazeRar5ReadResult rr;
 
     memset(&pending_dirs, 0, sizeof(pending_dirs));
+    raze_compressed_scratch_init(&compressed_scratch);
 
     if (archive_path == 0 || output_dir == 0) {
         return RAZE_STATUS_BAD_ARGUMENT;
@@ -489,7 +493,8 @@ RazeStatus raze_extract_store_archive(
                     output_dir,
                     options,
                     &prompt,
-                    &pending_dirs
+                    &pending_dirs,
+                    &compressed_scratch
                 );
                 if (status != RAZE_STATUS_OK) {
                     free(buf);
@@ -553,6 +558,7 @@ RazeStatus raze_extract_store_archive(
 
 cleanup:
     pending_dir_meta_list_free(&pending_dirs);
+    raze_compressed_scratch_free(&compressed_scratch);
     fclose(file);
     return status;
 }

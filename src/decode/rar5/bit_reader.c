@@ -1,6 +1,30 @@
 #include "bit_reader.h"
 
+#include <stddef.h>
 #include <string.h>
+
+static uint64_t load_be64_partial(const unsigned char *ptr, size_t avail)
+{
+	if (avail >= 8U) {
+		uint64_t raw;
+		memcpy(&raw, ptr, sizeof(raw));
+		return __builtin_bswap64(raw);
+	}
+
+	uint64_t value = 0;
+	size_t i;
+	size_t count = avail < 8U ? avail : 8U;
+
+	for (i = 0; i < count; ++i) {
+		value = (value << 8U) | (uint64_t)ptr[i];
+	}
+
+	if (count < 8U) {
+		value <<= (8U - count) * 8U;
+	}
+
+	return value;
+}
 
 void raze_rar5_br_init(
 	RazeRar5BitReader *reader,
@@ -26,21 +50,32 @@ size_t raze_rar5_br_bit_offset(const RazeRar5BitReader *reader) {
 }
 
 int raze_rar5_br_add_bits(RazeRar5BitReader *reader, unsigned int bits) {
-	size_t total_bits;
-	size_t next_bits;
+	size_t advance_bytes;
+	unsigned int advance_bits;
+	size_t next_byte_pos;
+	unsigned int next_bit_pos;
 
 	if (reader == 0) {
 		return 0;
 	}
 
-	total_bits = reader->data_size * 8U;
-	next_bits = raze_rar5_br_bit_offset(reader) + (size_t)bits;
-	if (next_bits > total_bits) {
+	advance_bytes = (size_t)(bits >> 3U);
+	advance_bits = bits & 7U;
+
+	next_byte_pos = reader->byte_pos + advance_bytes;
+	next_bit_pos = reader->bit_pos + advance_bits;
+	if (next_bit_pos >= 8U) {
+		next_byte_pos += 1U;
+		next_bit_pos -= 8U;
+	}
+
+	if (next_byte_pos > reader->data_size ||
+	    (next_byte_pos == reader->data_size && next_bit_pos != 0U)) {
 		return 0;
 	}
 
-	reader->byte_pos = next_bits / 8U;
-	reader->bit_pos = (unsigned int)(next_bits % 8U);
+	reader->byte_pos = next_byte_pos;
+	reader->bit_pos = next_bit_pos;
 	return 1;
 }
 
@@ -49,58 +84,43 @@ int raze_rar5_br_read_bits(
 	unsigned int bits,
 	uint64_t *value
 ) {
-	uint64_t out = 0;
-	unsigned int i;
+	uint64_t chunk;
 
 	if (reader == 0 || value == 0 || bits > 56U) {
 		return 0;
 	}
-
-	for (i = 0; i < bits; ++i) {
-		unsigned char cur;
-		unsigned int bit;
-
-		if (reader->byte_pos >= reader->data_size) {
-			return 0;
-		}
-
-		cur = reader->data[reader->byte_pos];
-		bit = (cur >> (7U - reader->bit_pos)) & 1U;
-		out = (out << 1U) | (uint64_t)bit;
-
-		reader->bit_pos += 1U;
-		if (reader->bit_pos == 8U) {
-			reader->bit_pos = 0;
-			reader->byte_pos += 1U;
-		}
+	if (bits == 0U) {
+		*value = 0;
+		return 1;
+	}
+	if (reader->byte_pos > reader->data_size) {
+		return 0;
 	}
 
-	*value = out;
-	return 1;
+	chunk = load_be64_partial(reader->data + reader->byte_pos, reader->data_size - reader->byte_pos);
+	if (reader->bit_pos != 0U) {
+		chunk <<= reader->bit_pos;
+	}
+	*value = chunk >> (64U - bits);
+
+	return raze_rar5_br_add_bits(reader, bits);
 }
 
 uint16_t raze_rar5_br_peek16(const RazeRar5BitReader *reader) {
 	uint32_t bit_field;
 	unsigned int shift;
-	unsigned char b0 = 0;
-	unsigned char b1 = 0;
-	unsigned char b2 = 0;
+	const unsigned char *p;
 
 	if (reader == 0) {
 		return 0;
 	}
-
-	if (reader->byte_pos < reader->data_size) {
-		b0 = reader->data[reader->byte_pos];
-	}
-	if (reader->byte_pos + 1U < reader->data_size) {
-		b1 = reader->data[reader->byte_pos + 1U];
-	}
-	if (reader->byte_pos + 2U < reader->data_size) {
-		b2 = reader->data[reader->byte_pos + 2U];
+	if (reader->byte_pos > reader->data_size) {
+		return 0;
 	}
 
-	bit_field = ((uint32_t)b0 << 16U) | ((uint32_t)b1 << 8U) | (uint32_t)b2;
+	p = reader->data + reader->byte_pos;
+
+	bit_field = ((uint32_t)p[0] << 16U) | ((uint32_t)p[1] << 8U) | (uint32_t)p[2];
 	shift = 8U - reader->bit_pos;
 	bit_field >>= shift;
 	return (uint16_t)(bit_field & 0xffffU);
