@@ -1,5 +1,6 @@
 #include "rar5_kdf.h"
 
+#include <stdlib.h>
 #include <string.h>
 
 #if defined(RAZE_HAVE_OPENSSL) && RAZE_HAVE_OPENSSL
@@ -16,6 +17,116 @@ static void secure_zero(void *ptr, size_t len)
 }
 
 #if defined(RAZE_HAVE_OPENSSL) && RAZE_HAVE_OPENSSL
+#define RAZE_RAR5_KDF_CACHE_SIZE 8U
+
+typedef struct RazeRar5KdfCacheEntry {
+	int valid;
+	char *password;
+	size_t password_len;
+	unsigned char salt[RAZE_RAR5_SALT_SIZE];
+	uint8_t lg2_count;
+	unsigned char key[RAZE_RAR5_KEY_SIZE];
+	unsigned char hash_key[RAZE_RAR5_HASH_KEY_SIZE];
+	unsigned char psw_value[RAZE_RAR5_KEY_SIZE];
+} RazeRar5KdfCacheEntry;
+
+static RazeRar5KdfCacheEntry g_raze_rar5_kdf_cache[RAZE_RAR5_KDF_CACHE_SIZE];
+static size_t g_raze_rar5_kdf_cache_next;
+
+static void kdf_cache_entry_clear(RazeRar5KdfCacheEntry *entry)
+{
+	if (entry == 0) {
+		return;
+	}
+	if (entry->password != 0) {
+		secure_zero(entry->password, entry->password_len);
+		free(entry->password);
+	}
+	secure_zero(entry->salt, sizeof(entry->salt));
+	secure_zero(entry->key, sizeof(entry->key));
+	secure_zero(entry->hash_key, sizeof(entry->hash_key));
+	secure_zero(entry->psw_value, sizeof(entry->psw_value));
+	memset(entry, 0, sizeof(*entry));
+}
+
+static int kdf_cache_lookup(
+	const char *password_utf8,
+	const unsigned char salt[RAZE_RAR5_SALT_SIZE],
+	uint8_t lg2_count,
+	unsigned char key_out[RAZE_RAR5_KEY_SIZE],
+	unsigned char hash_key_out[RAZE_RAR5_HASH_KEY_SIZE],
+	unsigned char psw_value_out[RAZE_RAR5_KEY_SIZE]
+)
+{
+	size_t i;
+	size_t password_len;
+
+	if (password_utf8 == 0) {
+		return 0;
+	}
+
+	password_len = strlen(password_utf8);
+	for (i = 0U; i < RAZE_RAR5_KDF_CACHE_SIZE; ++i) {
+		const RazeRar5KdfCacheEntry *entry = &g_raze_rar5_kdf_cache[i];
+
+		if (!entry->valid ||
+		    entry->lg2_count != lg2_count ||
+		    entry->password_len != password_len ||
+		    entry->password == 0 ||
+		    memcmp(entry->salt, salt, RAZE_RAR5_SALT_SIZE) != 0 ||
+		    memcmp(entry->password, password_utf8, password_len) != 0) {
+			continue;
+		}
+
+		memcpy(key_out, entry->key, RAZE_RAR5_KEY_SIZE);
+		memcpy(hash_key_out, entry->hash_key, RAZE_RAR5_HASH_KEY_SIZE);
+		memcpy(psw_value_out, entry->psw_value, RAZE_RAR5_KEY_SIZE);
+		return 1;
+	}
+
+	return 0;
+}
+
+static void kdf_cache_store(
+	const char *password_utf8,
+	const unsigned char salt[RAZE_RAR5_SALT_SIZE],
+	uint8_t lg2_count,
+	const unsigned char key[RAZE_RAR5_KEY_SIZE],
+	const unsigned char hash_key[RAZE_RAR5_HASH_KEY_SIZE],
+	const unsigned char psw_value[RAZE_RAR5_KEY_SIZE]
+)
+{
+	RazeRar5KdfCacheEntry *entry;
+	size_t password_len;
+
+	if (password_utf8 == 0) {
+		return;
+	}
+
+	password_len = strlen(password_utf8);
+	entry = &g_raze_rar5_kdf_cache[g_raze_rar5_kdf_cache_next];
+	g_raze_rar5_kdf_cache_next += 1U;
+	if (g_raze_rar5_kdf_cache_next == RAZE_RAR5_KDF_CACHE_SIZE) {
+		g_raze_rar5_kdf_cache_next = 0U;
+	}
+
+	kdf_cache_entry_clear(entry);
+	entry->password = (char *)malloc(password_len + 1U);
+	if (entry->password == 0) {
+		return;
+	}
+
+	memcpy(entry->password, password_utf8, password_len);
+	entry->password[password_len] = '\0';
+	entry->password_len = password_len;
+	memcpy(entry->salt, salt, RAZE_RAR5_SALT_SIZE);
+	entry->lg2_count = lg2_count;
+	memcpy(entry->key, key, RAZE_RAR5_KEY_SIZE);
+	memcpy(entry->hash_key, hash_key, RAZE_RAR5_HASH_KEY_SIZE);
+	memcpy(entry->psw_value, psw_value, RAZE_RAR5_KEY_SIZE);
+	entry->valid = 1;
+}
+
 static int hmac_sha256(
 	const unsigned char *key,
 	size_t key_len,
@@ -56,6 +167,9 @@ int raze_rar5_kdf_derive(
 	}
 	if (lg2_count > RAZE_RAR5_KDF_LG2_MAX) {
 		return 0;
+	}
+	if (kdf_cache_lookup(password_utf8, salt, lg2_count, key_out, hash_key_out, psw_value_out)) {
+		return 1;
 	}
 
 	count = 1U << lg2_count;
@@ -120,6 +234,7 @@ int raze_rar5_kdf_derive(
 		}
 	}
 	memcpy(psw_value_out, f, RAZE_RAR5_KEY_SIZE);
+	kdf_cache_store(password_utf8, salt, lg2_count, key_out, hash_key_out, psw_value_out);
 
 	secure_zero(salt_plus_index, sizeof(salt_plus_index));
 	secure_zero(u, sizeof(u));

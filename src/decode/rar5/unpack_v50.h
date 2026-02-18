@@ -23,9 +23,10 @@ typedef struct RazeRar5UnpackCtx {
 	RazeRar5DecodeTable bd;
 	size_t old_dist[4];
 	uint32_t last_length;
-	unsigned char *history;
-	size_t history_size;
-	size_t history_capacity;
+	unsigned char *dict;
+	size_t dict_capacity;
+	size_t dict_write_pos;
+	size_t dict_filled;
 	size_t dict_size;
 	int tables_ready;
 	int extra_dist;

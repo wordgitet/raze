@@ -7,7 +7,6 @@
 
 #include "bit_reader.h"
 #include "filter.h"
-#include "window.h"
 
 #define RAZE_RAR5_MAX_LZ_MATCH 0x1001U
 #define RAZE_RAR5_MAX_INC_LZ_MATCH (RAZE_RAR5_MAX_LZ_MATCH + 3U)
@@ -304,47 +303,259 @@ static int read_tables(
 	return 1;
 }
 
-static int ensure_history_capacity(RazeRar5UnpackCtx *ctx, size_t need)
+static int ensure_dict_capacity(RazeRar5UnpackCtx *ctx, size_t need)
 {
 	unsigned char *expanded;
 
-	if (need <= ctx->history_capacity) {
+	if (ctx == 0) {
+		return 0;
+	}
+	if (need == 0U) {
 		return 1;
 	}
-	expanded = (unsigned char *)realloc(ctx->history, need);
+	if (need <= ctx->dict_capacity) {
+		return 1;
+	}
+	expanded = (unsigned char *)realloc(ctx->dict, need);
 	if (expanded == 0) {
 		return 0;
 	}
-	ctx->history = expanded;
-	ctx->history_capacity = need;
+	ctx->dict = expanded;
+	ctx->dict_capacity = need;
 	return 1;
 }
 
-static void update_history(
+static int dict_put_byte(
 	RazeRar5UnpackCtx *ctx,
-	const unsigned char *data,
-	size_t data_size,
-	size_t dict_size
+	size_t dict_size,
+	unsigned char value
 )
 {
-	size_t keep;
+	if (ctx == 0 || dict_size == 0U || ctx->dict == 0) {
+		return 0;
+	}
 
-	if (dict_size == 0U || data == 0 || data_size == 0U) {
-		ctx->history_size = 0U;
-		ctx->dict_size = dict_size;
+	ctx->dict[ctx->dict_write_pos] = value;
+	ctx->dict_write_pos += 1U;
+	if (ctx->dict_write_pos == dict_size) {
+		ctx->dict_write_pos = 0U;
+	}
+	if (ctx->dict_filled < dict_size) {
+		ctx->dict_filled += 1U;
+	}
+	return 1;
+}
+
+static int dict_append_bytes(
+	RazeRar5UnpackCtx *ctx,
+	size_t dict_size,
+	const unsigned char *src,
+	size_t length
+)
+{
+	size_t write_pos;
+	size_t filled;
+	size_t total;
+
+	if (ctx == 0 || src == 0 || dict_size == 0U || ctx->dict == 0) {
+		return 0;
+	}
+	if (length == 0U) {
+		return 1;
+	}
+
+	write_pos = ctx->dict_write_pos;
+	filled = ctx->dict_filled;
+	total = length;
+	while (length > 0U) {
+		size_t chunk = dict_size - write_pos;
+		if (chunk > length) {
+			chunk = length;
+		}
+		memcpy(ctx->dict + write_pos, src, chunk);
+		src += chunk;
+		length -= chunk;
+		write_pos += chunk;
+		if (write_pos == dict_size) {
+			write_pos = 0U;
+		}
+	}
+
+	ctx->dict_write_pos = write_pos;
+	if (filled < dict_size) {
+		if (total >= dict_size - filled) {
+			ctx->dict_filled = dict_size;
+		} else {
+			ctx->dict_filled = filled + total;
+		}
+	}
+	return 1;
+}
+
+static int dict_fill_repeat(
+	RazeRar5UnpackCtx *ctx,
+	size_t dict_size,
+	unsigned char value,
+	size_t length
+)
+{
+	size_t write_pos;
+	size_t filled;
+	size_t total;
+
+	if (ctx == 0 || dict_size == 0U || ctx->dict == 0) {
+		return 0;
+	}
+	if (length == 0U) {
+		return 1;
+	}
+
+	write_pos = ctx->dict_write_pos;
+	filled = ctx->dict_filled;
+	total = length;
+	while (length > 0U) {
+		size_t chunk = dict_size - write_pos;
+		if (chunk > length) {
+			chunk = length;
+		}
+		memset(ctx->dict + write_pos, value, chunk);
+		length -= chunk;
+		write_pos += chunk;
+		if (write_pos == dict_size) {
+			write_pos = 0U;
+		}
+	}
+
+	ctx->dict_write_pos = write_pos;
+	if (filled < dict_size) {
+		if (total >= dict_size - filled) {
+			ctx->dict_filled = dict_size;
+		} else {
+			ctx->dict_filled = filled + total;
+		}
+	}
+	return 1;
+}
+
+static void copy_from_output_with_overlap(unsigned char *dst, size_t length, size_t distance)
+{
+	size_t copied;
+
+	if (distance >= length) {
+		memcpy(dst, dst - distance, length);
 		return;
 	}
 
-	keep = data_size < dict_size ? data_size : dict_size;
-	if (!ensure_history_capacity(ctx, keep)) {
-		ctx->history_size = 0U;
-		ctx->dict_size = dict_size;
-		return;
+	memcpy(dst, dst - distance, distance);
+	copied = distance;
+	while (copied < length) {
+		size_t chunk = copied;
+		if (chunk > length - copied) {
+			chunk = length - copied;
+		}
+		memcpy(dst + copied, dst, chunk);
+		copied += chunk;
+	}
+}
+
+static int write_decoded_byte(
+	RazeRar5UnpackCtx *ctx,
+	unsigned char *output,
+	size_t output_size,
+	size_t *out_pos,
+	size_t dict_size,
+	unsigned char value
+)
+{
+	if (ctx == 0 || output == 0 || out_pos == 0 || *out_pos >= output_size) {
+		return 0;
+	}
+	output[*out_pos] = value;
+	*out_pos += 1U;
+	return dict_put_byte(ctx, dict_size, value);
+}
+
+static int copy_match_to_output(
+	RazeRar5UnpackCtx *ctx,
+	unsigned char *output,
+	size_t output_size,
+	size_t *out_pos,
+	size_t dict_size,
+	size_t length,
+	size_t distance
+)
+{
+	size_t out;
+
+	if (ctx == 0 || output == 0 || out_pos == 0) {
+		return 0;
+	}
+	if (*out_pos > output_size || length > output_size - *out_pos) {
+		return 0;
+	}
+	if (length == 0U) {
+		return 1;
 	}
 
-	memcpy(ctx->history, data + (data_size - keep), keep);
-	ctx->history_size = keep;
-	ctx->dict_size = dict_size;
+	out = *out_pos;
+
+	if (distance == 0U || distance > ctx->dict_filled) {
+		memset(output + out, 0, length);
+		if (!dict_fill_repeat(ctx, dict_size, 0U, length)) {
+			return 0;
+		}
+		*out_pos = out + length;
+		return 1;
+	}
+
+	if (distance == 1U) {
+		size_t src_pos = ctx->dict_write_pos == 0U ? dict_size - 1U : ctx->dict_write_pos - 1U;
+		unsigned char value = ctx->dict[src_pos];
+		memset(output + out, value, length);
+		if (!dict_fill_repeat(ctx, dict_size, value, length)) {
+			return 0;
+		}
+		*out_pos = out + length;
+		return 1;
+	}
+
+	if (distance <= out) {
+		unsigned char *dst = output + out;
+		copy_from_output_with_overlap(dst, length, distance);
+		if (!dict_append_bytes(ctx, dict_size, dst, length)) {
+			return 0;
+		}
+		*out_pos = out + length;
+		return 1;
+	}
+
+	while (length > 0U) {
+		size_t src_pos = ctx->dict_write_pos + dict_size - distance;
+		size_t chunk = length;
+		size_t src_span;
+
+		if (src_pos >= dict_size) {
+			src_pos -= dict_size;
+		}
+		if (chunk > distance) {
+			chunk = distance;
+		}
+		src_span = dict_size - src_pos;
+		if (chunk > src_span) {
+			chunk = src_span;
+		}
+
+		memcpy(output + out, ctx->dict + src_pos, chunk);
+		if (!dict_append_bytes(ctx, dict_size, output + out, chunk)) {
+			return 0;
+		}
+
+		out += chunk;
+		length -= chunk;
+	}
+
+	*out_pos = out;
+	return 1;
 }
 
 void raze_rar5_unpack_ctx_reset_for_new_stream(RazeRar5UnpackCtx *ctx)
@@ -365,7 +576,8 @@ void raze_rar5_unpack_ctx_reset_for_new_stream(RazeRar5UnpackCtx *ctx)
 		ctx->old_dist[i] = SIZE_MAX;
 	}
 	ctx->last_length = 0U;
-	ctx->history_size = 0U;
+	ctx->dict_write_pos = 0U;
+	ctx->dict_filled = 0U;
 	ctx->dict_size = 0U;
 	ctx->extra_dist = 0;
 	ctx->solid_initialized = 0;
@@ -387,10 +599,11 @@ void raze_rar5_unpack_ctx_free(RazeRar5UnpackCtx *ctx)
 		return;
 	}
 
-	free(ctx->history);
-	ctx->history = 0;
-	ctx->history_size = 0;
-	ctx->history_capacity = 0;
+	free(ctx->dict);
+	ctx->dict = 0;
+	ctx->dict_capacity = 0;
+	ctx->dict_write_pos = 0;
+	ctx->dict_filled = 0;
 	raze_rar5_unpack_ctx_reset_for_new_stream(ctx);
 }
 
@@ -407,10 +620,8 @@ RazeStatus raze_rar5_unpack_ctx_decode_file(
 {
 	RazeRar5BitReader reader;
 	RazeRar5BlockHeader block;
-	RazeRar5Window window;
 	RazeRar5FilterQueue filter_queue;
-	size_t prefix_len = 0U;
-	size_t window_size = 0U;
+	size_t out_pos = 0U;
 	int file_done = 0;
 	int unsupported_filter = 0;
 	RazeStatus status = RAZE_STATUS_OK;
@@ -434,35 +645,27 @@ RazeStatus raze_rar5_unpack_ctx_decode_file(
 		}
 	}
 
-	if (solid && ctx->solid_initialized && dict_size > 0U) {
-		prefix_len = ctx->history_size < dict_size ? ctx->history_size : dict_size;
-	}
-	if (output_size > SIZE_MAX - prefix_len) {
-		raze_rar5_unpack_ctx_reset_for_new_stream(ctx);
-		return RAZE_STATUS_BAD_ARCHIVE;
-	}
-	window_size = prefix_len + output_size;
-
 	if (packed_size == 0U && output_size == 0U) {
 		if (solid) {
-			update_history(ctx, ctx->history, ctx->history_size, dict_size);
+			ctx->dict_size = dict_size;
 			ctx->extra_dist = extra_dist;
 			ctx->solid_initialized = 1;
 		}
 		return RAZE_STATUS_OK;
 	}
-	if (packed_size == 0U || (output_size > 0U && window_size == prefix_len)) {
+	if (packed_size == 0U || dict_size == 0U) {
 		raze_rar5_unpack_ctx_reset_for_new_stream(ctx);
 		return RAZE_STATUS_BAD_ARCHIVE;
 	}
-
-	if (!raze_rar5_window_init(&window, window_size)) {
+	if (!ensure_dict_capacity(ctx, dict_size)) {
+		raze_rar5_unpack_ctx_reset_for_new_stream(ctx);
 		return RAZE_STATUS_IO;
 	}
-	if (prefix_len > 0U) {
-		memcpy(window.data, ctx->history + (ctx->history_size - prefix_len), prefix_len);
+	ctx->dict_size = dict_size;
+	if (!solid || !ctx->solid_initialized) {
+		ctx->dict_write_pos = 0U;
+		ctx->dict_filled = 0U;
 	}
-	window.pos = prefix_len;
 
 	raze_rar5_filter_queue_init(&filter_queue);
 	raze_rar5_br_init(&reader, packed, packed_size);
@@ -475,7 +678,7 @@ RazeStatus raze_rar5_unpack_ctx_decode_file(
 		goto done;
 	}
 
-	while (window.pos < window.size) {
+	while (out_pos < output_size) {
 		while (past_block(&reader, &block)) {
 			if (block.last_block_in_file) {
 				file_done = 1;
@@ -506,7 +709,14 @@ RazeStatus raze_rar5_unpack_ctx_decode_file(
 			}
 
 			if (main_slot < 256U) {
-				if (!raze_rar5_window_put_literal(&window, (unsigned char)main_slot)) {
+				if (!write_decoded_byte(
+						ctx,
+						output,
+						output_size,
+						&out_pos,
+						dict_size,
+						(unsigned char)main_slot
+					)) {
 					status = RAZE_STATUS_BAD_ARCHIVE;
 					goto done;
 				}
@@ -578,7 +788,15 @@ RazeStatus raze_rar5_unpack_ctx_decode_file(
 
 				insert_old_dist(ctx->old_dist, distance);
 				ctx->last_length = length;
-				if (!raze_rar5_window_copy_match(&window, length, distance)) {
+				if (!copy_match_to_output(
+						ctx,
+						output,
+						output_size,
+						&out_pos,
+						dict_size,
+						length,
+						distance
+					)) {
 					status = RAZE_STATUS_BAD_ARCHIVE;
 					goto done;
 				}
@@ -586,7 +804,7 @@ RazeStatus raze_rar5_unpack_ctx_decode_file(
 			}
 
 			if (main_slot == 256U) {
-				size_t file_pos = window.pos >= prefix_len ? window.pos - prefix_len : 0U;
+				size_t file_pos = out_pos;
 				if (!read_filter(&reader, file_pos, &filter_queue)) {
 					status = RAZE_STATUS_BAD_ARCHIVE;
 					goto done;
@@ -596,7 +814,15 @@ RazeStatus raze_rar5_unpack_ctx_decode_file(
 
 			if (main_slot == 257U) {
 				if (ctx->last_length != 0U) {
-					if (!raze_rar5_window_copy_match(&window, ctx->last_length, ctx->old_dist[0])) {
+					if (!copy_match_to_output(
+							ctx,
+							output,
+							output_size,
+							&out_pos,
+							dict_size,
+							ctx->last_length,
+							ctx->old_dist[0]
+						)) {
 						status = RAZE_STATUS_BAD_ARCHIVE;
 						goto done;
 					}
@@ -628,7 +854,15 @@ RazeStatus raze_rar5_unpack_ctx_decode_file(
 				}
 
 				ctx->last_length = length;
-				if (!raze_rar5_window_copy_match(&window, length, distance)) {
+				if (!copy_match_to_output(
+						ctx,
+						output,
+						output_size,
+						&out_pos,
+						dict_size,
+						length,
+						distance
+					)) {
 					status = RAZE_STATUS_BAD_ARCHIVE;
 					goto done;
 				}
@@ -640,13 +874,9 @@ RazeStatus raze_rar5_unpack_ctx_decode_file(
 		}
 	}
 
-	if (window.pos != window.size) {
+	if (out_pos != output_size) {
 		status = RAZE_STATUS_BAD_ARCHIVE;
 		goto done;
-	}
-
-	if (output_size > 0U) {
-		memcpy(output, window.data + prefix_len, output_size);
 	}
 	if (!raze_rar5_apply_filters(output, output_size, &filter_queue, &unsupported_filter)) {
 		if (unsupported_filter) {
@@ -658,7 +888,7 @@ RazeStatus raze_rar5_unpack_ctx_decode_file(
 	}
 
 	if (solid) {
-		update_history(ctx, window.data, window.size, dict_size);
+		ctx->dict_size = dict_size;
 		ctx->extra_dist = extra_dist;
 		ctx->solid_initialized = 1;
 	} else {
@@ -667,7 +897,6 @@ RazeStatus raze_rar5_unpack_ctx_decode_file(
 
 done:
 	raze_rar5_filter_queue_free(&filter_queue);
-	raze_rar5_window_free(&window);
 	if (status != RAZE_STATUS_OK) {
 		raze_rar5_unpack_ctx_reset_for_new_stream(ctx);
 	}

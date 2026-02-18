@@ -183,8 +183,7 @@ static RazeStatus decrypt_packed_payload_if_needed(
 	memset(out_hash_key, 0, RAZE_RAR5_HASH_KEY_SIZE);
 
 	if (!fh->encrypted) {
-		memcpy(packed_out, packed_in, packed_size);
-		return RAZE_STATUS_OK;
+		return RAZE_STATUS_BAD_ARGUMENT;
 	}
 	if (!password_present || password == 0) {
 		return RAZE_STATUS_BAD_ARGUMENT;
@@ -248,6 +247,7 @@ RazeStatus raze_extract_compressed_payload(
 	unsigned char *local_packed = 0;
 	unsigned char *local_decrypted_packed = 0;
 	unsigned char *local_unpacked = 0;
+	const unsigned char *packed_for_decode = 0;
 	unsigned char zero_output = 0;
 	size_t packed_size;
 	size_t packed_alloc_size;
@@ -294,12 +294,14 @@ RazeStatus raze_extract_compressed_payload(
 		if (!ensure_scratch_capacity(&scratch->packed, &scratch->packed_capacity, packed_alloc_size)) {
 			return RAZE_STATUS_IO;
 		}
-		if (!ensure_scratch_capacity(
-				&scratch->decrypted_packed,
-				&scratch->decrypted_packed_capacity,
-				packed_alloc_size
-			)) {
-			return RAZE_STATUS_IO;
+		if (fh->encrypted) {
+			if (!ensure_scratch_capacity(
+					&scratch->decrypted_packed,
+					&scratch->decrypted_packed_capacity,
+					packed_alloc_size
+				)) {
+				return RAZE_STATUS_IO;
+			}
 		}
 		if (!ensure_scratch_capacity(
 				&scratch->unpacked,
@@ -309,13 +311,15 @@ RazeStatus raze_extract_compressed_payload(
 			return RAZE_STATUS_IO;
 		}
 		packed = scratch->packed;
-		decrypted_packed = scratch->decrypted_packed;
+		decrypted_packed = fh->encrypted ? scratch->decrypted_packed : 0;
 		unpacked = scratch->unpacked;
 	} else {
 		local_packed = (unsigned char *)malloc(packed_alloc_size);
-		local_decrypted_packed = (unsigned char *)malloc(packed_alloc_size);
+		if (fh->encrypted) {
+			local_decrypted_packed = (unsigned char *)malloc(packed_alloc_size);
+		}
 		local_unpacked = (unsigned char *)malloc(unpacked_size > 0U ? unpacked_size : 1U);
-		if (local_packed == 0 || local_decrypted_packed == 0 || local_unpacked == 0) {
+		if (local_packed == 0 || local_unpacked == 0 || (fh->encrypted && local_decrypted_packed == 0)) {
 			free(local_packed);
 			free(local_decrypted_packed);
 			free(local_unpacked);
@@ -332,21 +336,27 @@ RazeStatus raze_extract_compressed_payload(
 	}
 	memset(packed + packed_size, 0, 8U);
 
-	status = decrypt_packed_payload_if_needed(
-		fh,
-		password,
-		password_present,
-		packed,
-		packed_size,
-		decrypted_packed,
-		key,
-		hash_key
-	);
-	if (status != RAZE_STATUS_OK) {
-		goto done;
+	if (fh->encrypted) {
+		status = decrypt_packed_payload_if_needed(
+			fh,
+			password,
+			password_present,
+			packed,
+			packed_size,
+			decrypted_packed,
+			key,
+			hash_key
+		);
+		if (status != RAZE_STATUS_OK) {
+			goto done;
+		}
+		packed_for_decode = decrypted_packed;
+		use_hash_key = fh->crypt_use_hash_key;
+	} else {
+		packed_for_decode = packed;
+		use_hash_key = 0;
 	}
 	decrypted_size = packed_size;
-	use_hash_key = fh->encrypted && fh->crypt_use_hash_key;
 
 	if (fh->method == 0U) {
 		if (decrypted_size < unpacked_size) {
@@ -355,7 +365,7 @@ RazeStatus raze_extract_compressed_payload(
 		}
 		status = write_or_verify_payload(
 			output,
-			unpacked_size > 0U ? decrypted_packed : &zero_output,
+			unpacked_size > 0U ? packed_for_decode : &zero_output,
 			unpacked_size,
 			fh->crc32_present,
 			fh->crc32,
@@ -372,7 +382,7 @@ RazeStatus raze_extract_compressed_payload(
 	if (scratch != 0) {
 		status = raze_rar5_unpack_ctx_decode_file(
 			&scratch->unpack_ctx,
-			decrypted_packed,
+			packed_for_decode,
 			decrypted_size,
 			unpacked_size > 0U ? unpacked : &zero_output,
 			unpacked_size,
@@ -384,7 +394,7 @@ RazeStatus raze_extract_compressed_payload(
 		raze_rar5_unpack_ctx_init(&local_ctx);
 		status = raze_rar5_unpack_ctx_decode_file(
 			&local_ctx,
-			decrypted_packed,
+			packed_for_decode,
 			decrypted_size,
 			unpacked_size > 0U ? unpacked : &zero_output,
 			unpacked_size,
