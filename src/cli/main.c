@@ -5,7 +5,7 @@
 #include "raze/raze.h"
 
 static void print_usage(const char *prog) {
-    printf("Raze V1 (RAR5 store-only extractor)\n");
+    printf("Raze V1 (RAR5 single-volume extractor)\n");
     printf("Usage: %s x [switches] <archive.rar> [path_to_extract/]\n", prog);
     printf("       %s l[t] <archive.rar>\n", prog);
     printf("       %s --help\n", prog);

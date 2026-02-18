@@ -41,6 +41,7 @@ static int build_file_header_payload(
     unsigned char *buf,
     size_t buf_cap,
     RazeRar5BlockHeader *block,
+    uint64_t comp_info,
     int bad_name_len,
     int add_crypt_extra,
     size_t *payload_len
@@ -69,7 +70,7 @@ static int build_file_header_payload(
     if (!append_vint(buf, buf_cap, &cursor, 0644U)) {
         return 0;
     }
-    if (!append_vint(buf, buf_cap, &cursor, 0U)) {
+    if (!append_vint(buf, buf_cap, &cursor, comp_info)) {
         return 0;
     }
     if (!append_vint(buf, buf_cap, &cursor, RAZE_RAR5_HOST_OS_UNIX)) {
@@ -270,7 +271,7 @@ static int test_file_header_valid(void) {
     RazeRar5FileHeader fh;
     int ok = 0;
 
-    if (!build_file_header_payload(payload, sizeof(payload), &block, 0, 0, &payload_len)) {
+    if (!build_file_header_payload(payload, sizeof(payload), &block, 0U, 0, 0, &payload_len)) {
         return 0;
     }
 
@@ -280,6 +281,11 @@ static int test_file_header_valid(void) {
 
     ok = fh.file_attr == 0644U &&
          fh.method == 0U &&
+         fh.comp_version == 0U &&
+         fh.dict_base_log2 == 0U &&
+         fh.dict_extra_scale == 0U &&
+         fh.dict_size_bytes == (128U * 1024U) &&
+         fh.comp_is_v50_compat == 0 &&
          fh.unp_size == 11U &&
          fh.pack_size == 11U &&
          fh.host_os == RAZE_RAR5_HOST_OS_UNIX &&
@@ -297,7 +303,7 @@ static int test_file_header_truncated(void) {
     RazeRar5BlockHeader block;
     RazeRar5FileHeader fh;
 
-    if (!build_file_header_payload(payload, sizeof(payload), &block, 0, 0, &payload_len)) {
+    if (!build_file_header_payload(payload, sizeof(payload), &block, 0U, 0, 0, &payload_len)) {
         return 0;
     }
 
@@ -310,7 +316,7 @@ static int test_file_header_bad_name_len(void) {
     RazeRar5BlockHeader block;
     RazeRar5FileHeader fh;
 
-    if (!build_file_header_payload(payload, sizeof(payload), &block, 1, 0, &payload_len)) {
+    if (!build_file_header_payload(payload, sizeof(payload), &block, 0U, 1, 0, &payload_len)) {
         return 0;
     }
 
@@ -324,7 +330,7 @@ static int test_file_header_crypt_extra(void) {
     RazeRar5FileHeader fh;
     int ok = 0;
 
-    if (!build_file_header_payload(payload, sizeof(payload), &block, 0, 1, &payload_len)) {
+    if (!build_file_header_payload(payload, sizeof(payload), &block, 0U, 0, 1, &payload_len)) {
         return 0;
     }
 
@@ -379,6 +385,53 @@ static int test_fs_meta_mode_mapping(void) {
     return 1;
 }
 
+static int test_file_header_v70_dict_info(void) {
+	unsigned char payload[128];
+	size_t payload_len = 0;
+	RazeRar5BlockHeader block;
+	RazeRar5FileHeader fh;
+	uint64_t comp_info;
+	int ok = 0;
+
+	comp_info = 1U;
+	comp_info |= 2U << 7U;
+	comp_info |= 4U << 10U;
+	comp_info |= 16U << 15U;
+
+	if (!build_file_header_payload(payload, sizeof(payload), &block, comp_info, 0, 0, &payload_len)) {
+		return 0;
+	}
+	if (!raze_rar5_parse_file_header(&block, payload, payload_len, &fh)) {
+		return 0;
+	}
+
+	ok = fh.comp_version == 1U &&
+	     fh.method == 2U &&
+	     fh.dict_base_log2 == 4U &&
+	     fh.dict_extra_scale == 16U &&
+	     fh.dict_size_bytes == 3145728U &&
+	     fh.comp_is_v50_compat == 0;
+
+	raze_rar5_file_header_free(&fh);
+	return ok;
+}
+
+static int test_file_header_invalid_comp_info(void) {
+	unsigned char payload[128];
+	size_t payload_len = 0;
+	RazeRar5BlockHeader block;
+	RazeRar5FileHeader fh;
+	uint64_t comp_info;
+
+	comp_info = 0U;
+	comp_info |= 1U << 15U;
+	if (!build_file_header_payload(payload, sizeof(payload), &block, comp_info, 0, 0, &payload_len)) {
+		return 0;
+	}
+
+	return !raze_rar5_parse_file_header(&block, payload, payload_len, &fh);
+}
+
 int main(void) {
     if (!test_vint_valid()) {
         return 1;
@@ -412,6 +465,12 @@ int main(void) {
     }
     if (!test_fs_meta_mode_mapping()) {
         return 11;
+    }
+    if (!test_file_header_v70_dict_info()) {
+        return 12;
+    }
+    if (!test_file_header_invalid_comp_info()) {
+        return 13;
     }
     return 0;
 }

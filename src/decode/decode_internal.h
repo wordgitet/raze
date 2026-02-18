@@ -26,6 +26,10 @@ typedef struct RazeRar5FileHeader {
     size_t name_len;
     uint64_t file_flags;
     uint64_t method;
+    uint64_t comp_version;
+    uint64_t dict_base_log2;
+    uint64_t dict_extra_scale;
+    uint64_t dict_size_bytes;
     uint64_t unp_size;
     uint64_t pack_size;
     uint64_t file_attr;
@@ -39,6 +43,7 @@ typedef struct RazeRar5FileHeader {
     int solid;
     int is_dir;
     int encrypted;
+    int comp_is_v50_compat;
 } RazeRar5FileHeader;
 
 typedef struct RazeRar5Scan {

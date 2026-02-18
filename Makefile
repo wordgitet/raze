@@ -1,5 +1,5 @@
 CC := cc
-CFLAGS := -std=c11 -O2 -Wall -Wextra -Wpedantic -Iinclude
+CFLAGS := -std=c11 -O2 -Wall -Wextra -Wpedantic -MMD -MP -Iinclude
 LDFLAGS :=
 
 TARGET := raze
@@ -16,8 +16,9 @@ endif
 
 SRCS := $(shell find src -type f -name '*.c' | sort)
 OBJS := $(patsubst %.c,$(BUILD_DIR)/%.o,$(SRCS))
+DEPS := $(OBJS:.o=.d)
 
-.PHONY: all clean run test bench-store corpus corpus-fetch corpus-local corpus-themed
+.PHONY: all clean run test bench-store bench-compressed corpus corpus-fetch corpus-local corpus-themed
 
 all: $(TARGET)
 
@@ -40,6 +41,9 @@ test: $(TARGET)
 bench-store: $(TARGET)
 	./bench/bench_store.sh
 
+bench-compressed: $(TARGET)
+	./bench/bench_compressed.sh
+
 corpus-fetch:
 	./scripts/corpus_fetch.sh
 
@@ -53,3 +57,5 @@ corpus: corpus-fetch corpus-local corpus-themed
 
 clean:
 	rm -rf $(BUILD_DIR) $(TARGET)
+
+-include $(DEPS)

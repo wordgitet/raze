@@ -42,6 +42,7 @@ Unsupported switch forms are rejected with usage exit code `2`.
 ```sh
 make test
 make bench-store
+make bench-compressed
 ```
 
 ## Corpus Workflow
@@ -66,7 +67,7 @@ Scripts detect already downloaded/generated artifacts and skip unnecessary work.
 
 ## Metadata Behavior (V1)
 
-- Extraction is store-only and fail-fast on unsupported archive features.
+- Extraction supports RAR5 methods `0..5` for non-solid, non-encrypted, single-volume archives.
 - `mtime` and mode are restored for files and directories when available.
 - Metadata apply errors are warnings (non-fatal), while data corruption and I/O errors remain fatal.
 

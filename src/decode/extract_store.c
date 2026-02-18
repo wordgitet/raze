@@ -17,6 +17,7 @@
 #include "../io/fs_meta.h"
 #include "../io/path_guard.h"
 #include "decode_internal.h"
+#include "extract_compressed.h"
 
 #define RAZE_RAR5_HEAD_MAIN 1U
 #define RAZE_RAR5_HEAD_FILE 2U
@@ -164,14 +165,20 @@ static RazeStatus ensure_supported_file(const RazeRar5FileHeader *fh) {
     if (fh->encrypted) {
         return RAZE_STATUS_UNSUPPORTED_FEATURE;
     }
-    if (fh->method != 0) {
+    if (fh->method > 5) {
+        return RAZE_STATUS_UNSUPPORTED_FEATURE;
+    }
+    if (fh->comp_version > 1) {
         return RAZE_STATUS_UNSUPPORTED_FEATURE;
     }
     if (fh->host_os != RAZE_RAR5_HOST_OS_WINDOWS &&
         fh->host_os != RAZE_RAR5_HOST_OS_UNIX) {
         return RAZE_STATUS_UNSUPPORTED_FEATURE;
     }
-    if (!fh->is_dir && fh->pack_size != fh->unp_size) {
+    if (!fh->is_dir && fh->method == 0 && fh->pack_size != fh->unp_size) {
+        return RAZE_STATUS_BAD_ARCHIVE;
+    }
+    if (fh->method != 0 && fh->dict_size_bytes == 0) {
         return RAZE_STATUS_BAD_ARCHIVE;
     }
     return RAZE_STATUS_OK;
@@ -222,6 +229,29 @@ static RazeStatus copy_store_payload(
     }
 
     return RAZE_STATUS_OK;
+}
+
+static RazeStatus decode_payload(
+	FILE *archive,
+	FILE *output,
+	const RazeRar5FileHeader *fh
+)
+{
+	if (archive == 0 || output == 0 || fh == 0) {
+		return RAZE_STATUS_BAD_ARGUMENT;
+	}
+
+	if (fh->method == 0) {
+		return copy_store_payload(
+			archive,
+			output,
+			fh->pack_size,
+			fh->crc32_present,
+			fh->crc32
+		);
+	}
+
+	return raze_extract_compressed_payload(archive, output, fh);
 }
 
 static RazeStatus handle_file_block(
@@ -344,7 +374,7 @@ static RazeStatus handle_file_block(
         goto done;
     }
 
-    status = copy_store_payload(archive, output, fh.pack_size, fh.crc32_present, fh.crc32);
+    status = decode_payload(archive, output, &fh);
     if (fclose(output) != 0 && status == RAZE_STATUS_OK) {
         status = RAZE_STATUS_IO;
     }

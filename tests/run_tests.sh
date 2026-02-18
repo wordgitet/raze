@@ -4,7 +4,10 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ARCHIVE_STORE="$ROOT_DIR/corpus/local/archives/local_store.rar"
 ARCHIVE_FAST="$ROOT_DIR/corpus/local/archives/local_fast.rar"
+ARCHIVE_SOLID="$ROOT_DIR/corpus/local/archives/local_best_solid.rar"
+ARCHIVE_THEMATIC_FAST="$ROOT_DIR/corpus/local/thematic/archives/thematic_fast.rar"
 SOURCE_DIR="$ROOT_DIR/corpus/local/source"
+THEMATIC_SOURCE_DIR="$ROOT_DIR/corpus/local/thematic/source"
 RAR_BIN="${RAR_BIN:-$(command -v rar || true)}"
 
 log() {
@@ -29,6 +32,20 @@ run_expect_exit() {
     fi
 }
 
+run_expect_exit_one_of() {
+    local expected_a="$1"
+    local expected_b="$2"
+    shift 2
+    local rc
+    set +e
+    "$@"
+    rc=$?
+    set -e
+    if [[ "$rc" -ne "$expected_a" && "$rc" -ne "$expected_b" ]]; then
+        fail "expected exit $expected_a or $expected_b, got $rc for command: $*"
+    fi
+}
+
 dir_hash() {
     local dir="$1"
     (
@@ -39,10 +56,14 @@ dir_hash() {
 
 log "ensuring local corpus exists"
 "$ROOT_DIR/scripts/corpus_build_local.sh"
+"$ROOT_DIR/scripts/corpus_build_thematic.sh"
 
 [[ -f "$ARCHIVE_STORE" ]] || fail "missing $ARCHIVE_STORE"
 [[ -f "$ARCHIVE_FAST" ]] || fail "missing $ARCHIVE_FAST"
+[[ -f "$ARCHIVE_SOLID" ]] || fail "missing $ARCHIVE_SOLID"
+[[ -f "$ARCHIVE_THEMATIC_FAST" ]] || fail "missing $ARCHIVE_THEMATIC_FAST"
 [[ -d "$SOURCE_DIR" ]] || fail "missing $SOURCE_DIR"
+[[ -d "$THEMATIC_SOURCE_DIR" ]] || fail "missing $THEMATIC_SOURCE_DIR"
 [[ -n "$RAR_BIN" ]] || fail "rar binary not found. Set RAR_BIN or install rar."
 
 TMP_DIR="$(mktemp -d)"
@@ -124,8 +145,23 @@ if [[ "$SRC_HASH" != "$SFX_HASH" ]]; then
     fail "SFX-prefixed archive extraction mismatch"
 fi
 
-log "checking unsupported compressed method archive"
-run_expect_exit 3 "$ROOT_DIR/raze" x -idq -op"$TMP_DIR/out_fast" "$ARCHIVE_FAST"
+log "checking compressed extraction path"
+run_expect_exit 0 "$ROOT_DIR/raze" x -idq -o+ -op"$TMP_DIR/out_fast" "$ARCHIVE_FAST"
+FAST_HASH="$(dir_hash "$TMP_DIR/out_fast")"
+if [[ "$SRC_HASH" != "$FAST_HASH" ]]; then
+    fail "compressed extraction hash mismatch"
+fi
+
+log "checking compressed extraction path on thematic corpus"
+run_expect_exit 0 "$ROOT_DIR/raze" x -idq -o+ -op"$TMP_DIR/out_thematic_fast" "$ARCHIVE_THEMATIC_FAST"
+THEMATIC_SRC_HASH="$(dir_hash "$THEMATIC_SOURCE_DIR")"
+THEMATIC_DST_HASH="$(dir_hash "$TMP_DIR/out_thematic_fast")"
+if [[ "$THEMATIC_SRC_HASH" != "$THEMATIC_DST_HASH" ]]; then
+    fail "thematic compressed extraction hash mismatch"
+fi
+
+log "checking unsupported solid archive rejection"
+run_expect_exit 3 "$ROOT_DIR/raze" x -idq -op"$TMP_DIR/out_solid" "$ARCHIVE_SOLID"
 
 log "checking long archive path support (>1024 bytes)"
 LONG_SRC_DIR="$TMP_DIR/long_src"
@@ -200,5 +236,13 @@ if [[ "$STORE_SIZE" -le 256 ]]; then
 fi
 dd if="$ARCHIVE_STORE" of="$TMP_DIR/truncated.rar" bs=1 count=$((STORE_SIZE / 2)) status=none
 run_expect_exit 4 "$ROOT_DIR/raze" x -idq -op"$TMP_DIR/out_bad" "$TMP_DIR/truncated.rar"
+
+log "checking bad compressed archive detection with truncated input"
+FAST_SIZE="$(stat -c%s "$ARCHIVE_FAST")"
+if [[ "$FAST_SIZE" -le 256 ]]; then
+    fail "compressed archive unexpectedly small for truncation test"
+fi
+dd if="$ARCHIVE_FAST" of="$TMP_DIR/truncated_fast.rar" bs=1 count=$((FAST_SIZE / 2)) status=none
+run_expect_exit_one_of 4 6 "$ROOT_DIR/raze" x -idq -op"$TMP_DIR/out_bad_fast" "$TMP_DIR/truncated_fast.rar"
 
 log "all tests passed"

@@ -9,7 +9,13 @@
 #define RAZE_RAR5_HFL_SPLITBEFORE 0x0008U
 #define RAZE_RAR5_HFL_SPLITAFTER 0x0010U
 #define RAZE_RAR5_FCI_SOLID 0x00000040U
+#define RAZE_RAR5_FCI_VERSION_MASK 0x0000003fU
+#define RAZE_RAR5_FCI_METHOD_MASK 0x00000380U
+#define RAZE_RAR5_FCI_DICT_BASE_MASK 0x00007c00U
+#define RAZE_RAR5_FCI_DICT_EXTRA_MASK 0x000f8000U
+#define RAZE_RAR5_FCI_V50_COMPAT 0x00100000U
 #define RAZE_RAR5_FHEXTRA_CRYPT 0x01U
+#define RAZE_RAR5_DICT_BASE_BYTES (128U * 1024U)
 
 static uint32_t read_u32le(const unsigned char raw[4]) {
     return ((uint32_t)raw[0]) |
@@ -18,8 +24,12 @@ static uint32_t read_u32le(const unsigned char raw[4]) {
            ((uint32_t)raw[3] << 24);
 }
 
-static int parse_extra_has_crypt(const unsigned char *buf, size_t extra_len) {
+static int parse_extra_has_crypt(const unsigned char *buf, size_t extra_len, int *parse_ok) {
     size_t cursor = 0;
+
+    if (parse_ok != 0) {
+        *parse_ok = 0;
+    }
 
     while (cursor < extra_len) {
         uint64_t field_size = 0;
@@ -28,6 +38,9 @@ static int parse_extra_has_crypt(const unsigned char *buf, size_t extra_len) {
         size_t next_pos;
 
         if (!raze_vint_decode(buf + cursor, extra_len - cursor, &consumed, &field_size)) {
+            return 0;
+        }
+        if ((size_t)field_size > SIZE_MAX - cursor) {
             return 0;
         }
         cursor += consumed;
@@ -42,12 +55,57 @@ static int parse_extra_has_crypt(const unsigned char *buf, size_t extra_len) {
         cursor += consumed;
 
         if (field_type == RAZE_RAR5_FHEXTRA_CRYPT) {
+            if (parse_ok != 0) {
+                *parse_ok = 1;
+            }
             return 1;
         }
         cursor = next_pos;
     }
 
+    if (parse_ok != 0) {
+        *parse_ok = 1;
+    }
     return 0;
+}
+
+static int compute_dict_size(
+    uint64_t comp_version,
+    uint64_t dict_base_log2,
+    uint64_t dict_extra_scale,
+    uint64_t *dict_size_out
+) {
+    uint64_t base;
+    uint64_t extra;
+
+    if (dict_size_out == 0) {
+        return 0;
+    }
+
+    if (comp_version == 0) {
+        if (dict_base_log2 > 15U || dict_extra_scale != 0U) {
+            return 0;
+        }
+    } else if (comp_version == 1) {
+        if (dict_base_log2 > 23U || dict_extra_scale > 31U) {
+            return 0;
+        }
+    } else {
+        return 1;
+    }
+
+    if (dict_base_log2 > 46U) {
+        return 0;
+    }
+
+    base = (uint64_t)RAZE_RAR5_DICT_BASE_BYTES << dict_base_log2;
+    extra = (base * dict_extra_scale) / 32U;
+    if (extra > UINT64_MAX - base) {
+        return 0;
+    }
+
+    *dict_size_out = base + extra;
+    return 1;
 }
 
 int raze_rar5_parse_file_header(
@@ -60,6 +118,7 @@ int raze_rar5_parse_file_header(
     size_t consumed = 0;
     uint64_t comp_info = 0;
     uint64_t name_len = 0;
+    int extra_parse_ok = 0;
     unsigned char crc_raw[4];
 
     if (block == 0 || buf == 0 || file_header == 0) {
@@ -140,14 +199,35 @@ int raze_rar5_parse_file_header(
     file_header->name_len = (size_t)name_len;
     cursor += (size_t)name_len;
 
-    file_header->method = (comp_info >> 7U) & 0x7U;
+    file_header->comp_version = comp_info & RAZE_RAR5_FCI_VERSION_MASK;
+    file_header->method = (comp_info & RAZE_RAR5_FCI_METHOD_MASK) >> 7U;
+    file_header->dict_base_log2 = (comp_info & RAZE_RAR5_FCI_DICT_BASE_MASK) >> 10U;
+    file_header->dict_extra_scale = (comp_info & RAZE_RAR5_FCI_DICT_EXTRA_MASK) >> 15U;
+    file_header->comp_is_v50_compat = (comp_info & RAZE_RAR5_FCI_V50_COMPAT) != 0;
     file_header->solid = (comp_info & RAZE_RAR5_FCI_SOLID) != 0;
     file_header->is_dir = (file_header->file_flags & RAZE_RAR5_FHFL_DIRECTORY) != 0;
+    if (file_header->comp_version != 1 && file_header->comp_is_v50_compat) {
+        raze_rar5_file_header_free(file_header);
+        return 0;
+    }
+    if (!compute_dict_size(
+            file_header->comp_version,
+            file_header->dict_base_log2,
+            file_header->dict_extra_scale,
+            &file_header->dict_size_bytes
+        )) {
+        raze_rar5_file_header_free(file_header);
+        return 0;
+    }
 
     if (block->extra_size > 0) {
         const unsigned char *extra_ptr = buf + block->extra_offset;
-        if (parse_extra_has_crypt(extra_ptr, (size_t)block->extra_size)) {
+        if (parse_extra_has_crypt(extra_ptr, (size_t)block->extra_size, &extra_parse_ok)) {
             file_header->encrypted = 1;
+        }
+        if (!extra_parse_ok) {
+            raze_rar5_file_header_free(file_header);
+            return 0;
         }
     }
 

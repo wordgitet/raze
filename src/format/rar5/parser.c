@@ -168,7 +168,7 @@ RazeStatus rar5_scan_archive(const char *archive_path, RazeRar5Scan *scan) {
     }
 
     if (scan->has_encryption || scan->has_multivolume || scan->has_solid ||
-        scan->has_split || scan->has_compressed_method || scan->has_unknown_unp_size) {
+        scan->has_split || scan->has_unknown_unp_size) {
         return RAZE_STATUS_UNSUPPORTED_FEATURE;
     }
 

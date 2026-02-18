@@ -52,7 +52,7 @@ Build a fast, modular RAR5 decompressor in C with measurable performance wins an
 
 - End-to-end extraction succeeds for a no-compression RAR5 corpus.
 
-## Phase 3: Core RAR5 Decode Engine (Single-Thread)
+## Phase 3: Core RAR5 Decode Engine (Single-Thread) - DONE
 
 ### Deliverables
 
@@ -108,6 +108,6 @@ Build a fast, modular RAR5 decompressor in C with measurable performance wins an
 
 ## Immediate Next Steps
 
-1. Implement RAR5 compressed-method decode engine (`Phase 3`).
-2. Add correctness tests for mixed real-world compressed RAR5 samples.
-3. Begin perf baselining of decode hot paths before optimization.
+1. Start `Phase 4` scope selection (solid, multivolume, encryption ordering).
+2. Optimize compressed decode hotspots using `bench-compressed` data.
+3. Add more corruption/fuzz coverage around compressed block parsing.
