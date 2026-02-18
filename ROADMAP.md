@@ -73,7 +73,7 @@ Build a fast, modular RAR5 decompressor in C with measurable performance wins an
 - Solid archive handling. - DONE
 - Multivolume support. - DONE
 - Optional encrypted archive support (if in scope). - DONE
-- Better error handling and diagnostics. - IN PROGRESS
+- Better error handling and diagnostics. - DONE
 
 ### Exit Criteria
 

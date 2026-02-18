@@ -1,3 +1,4 @@
+#include <errno.h>
 #include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -27,6 +28,24 @@ static int skip_forward(FILE *file, uint64_t bytes) {
         bytes -= (uint64_t)chunk;
     }
     return 1;
+}
+
+static const char *header_type_name(uint64_t header_type)
+{
+	switch (header_type) {
+	case RAZE_RAR5_HEAD_MAIN:
+		return "HEAD_MAIN";
+	case RAZE_RAR5_HEAD_FILE:
+		return "HEAD_FILE";
+	case RAZE_RAR5_HEAD_SERVICE:
+		return "HEAD_SERVICE";
+	case RAZE_RAR5_HEAD_CRYPT:
+		return "HEAD_CRYPT";
+	case RAZE_RAR5_HEAD_ENDARC:
+		return "HEAD_ENDARC";
+	default:
+		return "HEAD_UNKNOWN";
+	}
 }
 
 static void print_entry(
@@ -69,20 +88,23 @@ RazeStatus raze_list_rar5_archive(const char *archive_path, int technical) {
     int saw_main = 0;
     int saw_end = 0;
 
-    if (archive_path == 0) {
-        return RAZE_STATUS_BAD_ARGUMENT;
-    }
+	if (archive_path == 0) {
+		raze_diag_set("archive path is required");
+		return RAZE_STATUS_BAD_ARGUMENT;
+	}
 
-    file = fopen(archive_path, "rb");
-    if (file == 0) {
-        return RAZE_STATUS_IO;
-    }
+	file = fopen(archive_path, "rb");
+	if (file == 0) {
+		raze_diag_set("cannot open archive '%s': %s", archive_path, strerror(errno));
+		return RAZE_STATUS_IO;
+	}
 
-    status = raze_rar5_read_signature(file);
-    if (status != RAZE_STATUS_OK) {
-        fclose(file);
-        return status;
-    }
+	status = raze_rar5_read_signature(file);
+	if (status != RAZE_STATUS_OK) {
+		raze_diag_set("invalid or missing RAR5 signature in '%s'", archive_path);
+		fclose(file);
+		return status;
+	}
 
     for (;;) {
         RazeRar5BlockHeader block;
@@ -93,11 +115,18 @@ RazeStatus raze_list_rar5_archive(const char *archive_path, int technical) {
         if (rr == RAZE_RAR5_READ_EOF) {
             break;
         }
-        if (rr == RAZE_RAR5_READ_ERROR) {
-            free(buf);
-            fclose(file);
-            return status;
-        }
+		if (rr == RAZE_RAR5_READ_ERROR) {
+			long pos = ftell(file);
+			if (pos < 0) {
+				pos = 0;
+			}
+			raze_diag_set("failed reading block in '%s' near offset %llu",
+				      archive_path,
+				      (unsigned long long)pos);
+			free(buf);
+			fclose(file);
+			return status;
+		}
 
         switch (block.header_type) {
             case RAZE_RAR5_HEAD_MAIN:
@@ -106,19 +135,29 @@ RazeStatus raze_list_rar5_archive(const char *archive_path, int technical) {
             case RAZE_RAR5_HEAD_FILE:
             case RAZE_RAR5_HEAD_SERVICE: {
                 RazeRar5FileHeader fh;
-                if (!raze_rar5_parse_file_header(&block, buf, buf_len, &fh)) {
-                    free(buf);
-                    fclose(file);
-                    return RAZE_STATUS_BAD_ARCHIVE;
+				if (!raze_rar5_parse_file_header(&block, buf, buf_len, &fh)) {
+					raze_diag_set(
+						"malformed %s at offset %llu in '%s'",
+						header_type_name(block.header_type),
+						(unsigned long long)block.header_offset,
+						archive_path
+					);
+					free(buf);
+					fclose(file);
+					return RAZE_STATUS_BAD_ARCHIVE;
                 }
                 print_entry(&fh, technical, block.header_type == RAZE_RAR5_HEAD_SERVICE);
                 raze_rar5_file_header_free(&fh);
                 break;
             }
-            case RAZE_RAR5_HEAD_CRYPT:
-                free(buf);
-                fclose(file);
-                return RAZE_STATUS_UNSUPPORTED_FEATURE;
+			case RAZE_RAR5_HEAD_CRYPT:
+				raze_diag_set(
+					"encrypted headers are not supported in list mode for '%s'",
+					archive_path
+				);
+				free(buf);
+				fclose(file);
+				return RAZE_STATUS_UNSUPPORTED_FEATURE;
             case RAZE_RAR5_HEAD_ENDARC:
                 saw_end = 1;
                 break;
@@ -128,17 +167,27 @@ RazeStatus raze_list_rar5_archive(const char *archive_path, int technical) {
 
         free(buf);
 
-        if (!skip_forward(file, block.data_size)) {
-            fclose(file);
-            return RAZE_STATUS_BAD_ARCHIVE;
-        }
+		if (!skip_forward(file, block.data_size)) {
+			raze_diag_set(
+				"cannot skip payload for %s at offset %llu in '%s'",
+				header_type_name(block.header_type),
+				(unsigned long long)block.header_offset,
+				archive_path
+			);
+			fclose(file);
+			return RAZE_STATUS_BAD_ARCHIVE;
+		}
     }
 
     fclose(file);
 
-    if (!saw_main || !saw_end) {
-        return RAZE_STATUS_BAD_ARCHIVE;
-    }
+	if (!saw_main || !saw_end) {
+		raze_diag_set(
+			"archive '%s' is missing required main/end headers",
+			archive_path
+		);
+		return RAZE_STATUS_BAD_ARCHIVE;
+	}
 
     return RAZE_STATUS_OK;
 }

@@ -49,6 +49,12 @@ make bench-split
 make bench-encrypted
 ```
 
+Bench scripts pin UnRAR to single-thread by default for fair comparison with
+current `raze` decode path:
+
+- Default: `UNRAR_THREADS=1`
+- Override example: `UNRAR_THREADS=8 make bench-compressed`
+
 ## Corpus Workflow
 
 Keep benchmark corpora out of git and generate them on demand.
@@ -80,6 +86,13 @@ Scripts detect already downloaded/generated artifacts and skip unnecessary work.
 - Metadata apply errors are warnings (non-fatal), while data corruption and I/O errors remain fatal.
 - Wrong password returns checksum-class failure (`exit 6`).
 - Missing password in non-TTY mode fails deterministically (`exit 2`).
+
+## Diagnostics
+
+- Fatal CLI errors print status plus context when available:
+  - format: `raze: <status>: <detail>`
+  - example: `raze: io error: cannot open volume '...': No such file or directory`
+- Exit code mapping is unchanged and deterministic.
 
 ## UnRAR Compatibility Reference
 

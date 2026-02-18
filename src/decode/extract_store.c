@@ -65,6 +65,30 @@ typedef struct HeaderCryptState {
     unsigned char key[RAZE_RAR5_KEY_SIZE];
 } HeaderCryptState;
 
+static const char *header_type_name(uint64_t header_type)
+{
+	switch (header_type) {
+	case RAZE_RAR5_HEAD_MAIN:
+		return "HEAD_MAIN";
+	case RAZE_RAR5_HEAD_FILE:
+		return "HEAD_FILE";
+	case RAZE_RAR5_HEAD_SERVICE:
+		return "HEAD_SERVICE";
+	case RAZE_RAR5_HEAD_CRYPT:
+		return "HEAD_CRYPT";
+	case RAZE_RAR5_HEAD_ENDARC:
+		return "HEAD_ENDARC";
+	default:
+		return "HEAD_UNKNOWN";
+	}
+}
+
+static int diag_is_empty(void)
+{
+	const char *detail = raze_last_error_detail();
+	return detail == 0 || detail[0] == '\0';
+}
+
 static int skip_forward(FILE *file, uint64_t bytes) {
     while (bytes > 0) {
         long chunk;
@@ -144,6 +168,7 @@ static RazeStatus parse_head_crypt(
     RazeStatus status = RAZE_STATUS_OK;
 
     if (block == 0 || buf == 0 || options == 0 || state == 0) {
+        raze_diag_set("internal bad arguments while parsing HEAD_CRYPT");
         return RAZE_STATUS_BAD_ARGUMENT;
     }
     if (block->body_offset > buf_len || block->extra_offset > buf_len || block->body_offset > block->extra_offset) {
@@ -166,6 +191,8 @@ static RazeStatus parse_head_crypt(
     }
     cursor += consumed;
     if (crypt_version != 0U) {
+        raze_diag_set("unsupported HEAD_CRYPT version: %llu",
+                      (unsigned long long)crypt_version);
         return RAZE_STATUS_UNSUPPORTED_FEATURE;
     }
     if (block->extra_offset - cursor < 1U + RAZE_RAR5_SALT_SIZE) {
@@ -174,6 +201,8 @@ static RazeStatus parse_head_crypt(
 
     lg2_count = buf[cursor++];
     if (lg2_count > RAZE_RAR5_KDF_LG2_MAX) {
+        raze_diag_set("unsupported KDF iteration exponent in HEAD_CRYPT: %u",
+                      (unsigned)lg2_count);
         return RAZE_STATUS_UNSUPPORTED_FEATURE;
     }
     memcpy(salt, buf + cursor, RAZE_RAR5_SALT_SIZE);
@@ -193,6 +222,7 @@ static RazeStatus parse_head_crypt(
 
     has_password = options->password_present && options->password != 0 && options->password[0] != '\0';
     if (!has_password) {
+        raze_diag_set("password is required for encrypted archive headers");
         return RAZE_STATUS_BAD_ARGUMENT;
     }
 
@@ -205,6 +235,7 @@ static RazeStatus parse_head_crypt(
             psw_value
         )) {
         status = RAZE_STATUS_UNSUPPORTED_FEATURE;
+        raze_diag_set("unable to derive header decryption key");
         goto done;
     }
 
@@ -214,10 +245,12 @@ static RazeStatus parse_head_crypt(
 
         if (!raze_rar5_pswcheck_from_value(psw_value, calc_check, calc_check_csum)) {
             status = RAZE_STATUS_UNSUPPORTED_FEATURE;
+            raze_diag_set("unable to verify HEAD_CRYPT password check data");
             goto done;
         }
         if (memcmp(calc_check, psw_check, RAZE_RAR5_PSWCHECK_SIZE) != 0) {
             status = RAZE_STATUS_CRC_MISMATCH;
+            raze_diag_set("incorrect password for encrypted archive headers");
             goto done;
         }
     }
@@ -771,10 +804,13 @@ static RazeStatus decode_payload(
 )
 {
 	if (archive == 0 || fh == 0) {
+		raze_diag_set("internal bad arguments while decoding payload");
 		return RAZE_STATUS_BAD_ARGUMENT;
 	}
 	if (fh->encrypted &&
 	    (!password_present || password == 0 || password[0] == '\0')) {
+		raze_diag_set("password is required to extract encrypted entry '%s'",
+			      fh->name != 0 ? fh->name : "<unknown>");
 		return RAZE_STATUS_BAD_ARGUMENT;
 	}
 
@@ -818,6 +854,7 @@ static RazeStatus extract_file_entry(
     int solid_stream;
 
     if (payload_stream == 0 || fh == 0 || output_dir == 0 || pending_dirs == 0 || scratch == 0) {
+        raze_diag_set("internal bad arguments while extracting entry");
         return RAZE_STATUS_BAD_ARGUMENT;
     }
 
@@ -828,6 +865,7 @@ static RazeStatus extract_file_entry(
 
     status = raze_path_guard_join(output_dir, fh->name, fh->host_os, out_path, sizeof(out_path));
     if (status != RAZE_STATUS_OK) {
+        raze_diag_set("unsafe or invalid output path for entry '%s'", fh->name);
         return status;
     }
 
@@ -843,10 +881,12 @@ static RazeStatus extract_file_entry(
 
         status = raze_path_guard_make_dirs(out_path);
         if (status != RAZE_STATUS_OK) {
+            raze_diag_set("cannot create directory '%s'", out_path);
             return status;
         }
 
         if (!skip_forward(payload_stream, payload_size)) {
+            raze_diag_set("cannot skip payload for directory entry '%s'", fh->name);
             return RAZE_STATUS_BAD_ARCHIVE;
         }
 
@@ -862,6 +902,7 @@ static RazeStatus extract_file_entry(
 
     status = raze_path_guard_make_parent_dirs(out_path);
     if (status != RAZE_STATUS_OK) {
+        raze_diag_set("cannot create parent directories for '%s'", out_path);
         return status;
     }
 
@@ -870,6 +911,7 @@ static RazeStatus extract_file_entry(
         RazeOverwriteDecision decision;
 
         if (S_ISDIR(st.st_mode)) {
+            raze_diag_set("output path is an existing directory: '%s'", out_path);
             return RAZE_STATUS_IO;
         }
 
@@ -882,9 +924,11 @@ static RazeStatus extract_file_entry(
 
         decision = raze_overwrite_prompt_decide(prompt, out_path, &overwrite_stats);
         if (decision == RAZE_OVERWRITE_DECISION_ABORT) {
+            raze_diag_set("overwrite prompt aborted for '%s'", out_path);
             return RAZE_STATUS_ABORTED;
         }
         if (decision == RAZE_OVERWRITE_DECISION_ERROR) {
+            raze_diag_set("overwrite rejected for existing file '%s'", out_path);
             return RAZE_STATUS_EXISTS;
         }
         if (decision == RAZE_OVERWRITE_DECISION_SKIP) {
@@ -899,9 +943,13 @@ static RazeStatus extract_file_entry(
                     options != 0 ? options->password_present : 0
                 );
                 if (status != RAZE_STATUS_OK) {
+                    if (diag_is_empty()) {
+                        raze_diag_set("cannot decode skipped solid entry '%s'", fh->name);
+                    }
                     return status;
                 }
             } else if (!skip_forward(payload_stream, payload_size)) {
+                raze_diag_set("cannot skip payload for '%s'", fh->name);
                 return RAZE_STATUS_BAD_ARCHIVE;
             }
 
@@ -911,6 +959,7 @@ static RazeStatus extract_file_entry(
             return RAZE_STATUS_OK;
         }
     } else if (errno != ENOENT) {
+        raze_diag_set("cannot stat output path '%s': %s", out_path, strerror(errno));
         return RAZE_STATUS_IO;
     }
 
@@ -920,6 +969,7 @@ static RazeStatus extract_file_entry(
 
     output = fopen(out_path, "wb");
     if (output == 0) {
+        raze_diag_set("cannot create output file '%s': %s", out_path, strerror(errno));
         return RAZE_STATUS_IO;
     }
 
@@ -933,12 +983,15 @@ static RazeStatus extract_file_entry(
         options != 0 ? options->password_present : 0
     );
     if (fclose(output) != 0 && status == RAZE_STATUS_OK) {
+        raze_diag_set("flush/close failed for '%s': %s", out_path, strerror(errno));
         status = RAZE_STATUS_IO;
     }
     output = 0;
 
     if (status == RAZE_STATUS_OK) {
         apply_entry_metadata(fh, out_path, options != 0 ? options->quiet : 0);
+    } else if (diag_is_empty()) {
+        raze_diag_set("failed to extract entry '%s' to '%s'", fh->name, out_path);
     }
 
     if (status == RAZE_STATUS_CRC_MISMATCH || status == RAZE_STATUS_IO || status == RAZE_STATUS_BAD_ARCHIVE) {
@@ -1168,6 +1221,7 @@ RazeStatus raze_extract_store_archive(
     raze_compressed_scratch_init(&compressed_scratch);
 
     if (archive_path == 0 || output_dir == 0) {
+        raze_diag_set("archive path and output dir are required");
         return RAZE_STATUS_BAD_ARGUMENT;
     }
 
@@ -1178,11 +1232,13 @@ RazeStatus raze_extract_store_archive(
 
     status = raze_path_guard_make_dirs(output_dir);
     if (status != RAZE_STATUS_OK) {
+        raze_diag_set("cannot create output root '%s'", output_dir);
         goto cleanup;
     }
 
     status = raze_volume_chain_discover(archive_path, &volumes);
     if (status != RAZE_STATUS_OK) {
+        raze_diag_set("cannot discover archive volume chain from '%s'", archive_path);
         goto cleanup;
     }
 
@@ -1194,12 +1250,18 @@ RazeStatus raze_extract_store_archive(
 
         file = fopen(volumes.paths[volume_index], "rb");
         if (file == 0) {
+            raze_diag_set("cannot open volume '%s': %s",
+                          volumes.paths[volume_index], strerror(errno));
             status = RAZE_STATUS_IO;
             goto cleanup;
         }
 
         status = raze_rar5_read_signature(file);
         if (status != RAZE_STATUS_OK) {
+            if (diag_is_empty()) {
+                raze_diag_set("invalid or missing RAR5 signature in '%s'",
+                              volumes.paths[volume_index]);
+            }
             goto cleanup;
         }
 
@@ -1215,6 +1277,15 @@ RazeStatus raze_extract_store_archive(
                 break;
             }
             if (rr == RAZE_RAR5_READ_ERROR) {
+                if (diag_is_empty()) {
+                    long pos = ftell(file);
+                    if (pos < 0) {
+                        pos = 0;
+                    }
+                    raze_diag_set("failed reading block in '%s' near offset %llu",
+                                  volumes.paths[volume_index],
+                                  (unsigned long long)pos);
+                }
                 free(buf);
                 goto cleanup;
             }
@@ -1229,6 +1300,10 @@ RazeStatus raze_extract_store_archive(
                     saw_main = 1;
                     saw_main_in_volume = 1;
                     if (!raze_vint_decode(buf + cursor, block.extra_offset - cursor, &consumed, &arc_flags)) {
+                        raze_diag_set("malformed %s at offset %llu in '%s'",
+                                      header_type_name(block.header_type),
+                                      (unsigned long long)block.header_offset,
+                                      volumes.paths[volume_index]);
                         status = RAZE_STATUS_BAD_ARCHIVE;
                         free(buf);
                         goto cleanup;
@@ -1239,17 +1314,25 @@ RazeStatus raze_extract_store_archive(
                         archive_is_solid = (arc_flags & RAZE_RAR5_MHFL_SOLID) != 0;
                         archive_is_multivolume = volume_flag;
                         if (volumes.count > 1U && !volume_flag) {
+                            raze_diag_set("first volume '%s' does not carry multivolume flag",
+                                          volumes.paths[volume_index]);
                             status = RAZE_STATUS_BAD_ARCHIVE;
                             free(buf);
                             goto cleanup;
                         }
                     } else if (!volume_flag) {
+                        raze_diag_set("volume '%s' misses required multivolume flag",
+                                      volumes.paths[volume_index]);
                         status = RAZE_STATUS_BAD_ARCHIVE;
                         free(buf);
                         goto cleanup;
                     }
 
                     if (!skip_forward(file, block.data_size)) {
+                        raze_diag_set("cannot skip payload for %s at offset %llu in '%s'",
+                                      header_type_name(block.header_type),
+                                      (unsigned long long)block.header_offset,
+                                      volumes.paths[volume_index]);
                         status = RAZE_STATUS_BAD_ARCHIVE;
                         free(buf);
                         goto cleanup;
@@ -1287,6 +1370,13 @@ RazeStatus raze_extract_store_archive(
                         );
                     }
                     if (status != RAZE_STATUS_OK) {
+                        if (diag_is_empty()) {
+                            raze_diag_set("failed handling %s '%s' at offset %llu in '%s'",
+                                          header_type_name(block.header_type),
+                                          block.header_type == RAZE_RAR5_HEAD_FILE ? "file" : "split",
+                                          (unsigned long long)block.header_offset,
+                                          volumes.paths[volume_index]);
+                        }
                         free(buf);
                         goto cleanup;
                     }
@@ -1295,11 +1385,19 @@ RazeStatus raze_extract_store_archive(
                     RazeRar5FileHeader service_header;
                     memset(&service_header, 0, sizeof(service_header));
                     if (!raze_rar5_parse_file_header(&block, buf, buf_len, &service_header)) {
+                        raze_diag_set("malformed %s at offset %llu in '%s'",
+                                      header_type_name(block.header_type),
+                                      (unsigned long long)block.header_offset,
+                                      volumes.paths[volume_index]);
                         status = RAZE_STATUS_BAD_ARCHIVE;
                         free(buf);
                         goto cleanup;
                     }
                     if (!skip_forward(file, block.data_size)) {
+                        raze_diag_set("cannot skip payload for %s at offset %llu in '%s'",
+                                      header_type_name(block.header_type),
+                                      (unsigned long long)block.header_offset,
+                                      volumes.paths[volume_index]);
                         status = RAZE_STATUS_BAD_ARCHIVE;
                         raze_rar5_file_header_free(&service_header);
                         free(buf);
@@ -1311,10 +1409,20 @@ RazeStatus raze_extract_store_archive(
                 case RAZE_RAR5_HEAD_CRYPT:
                     status = parse_head_crypt(&block, buf, buf_len, options, &header_crypt);
                     if (status != RAZE_STATUS_OK) {
+                        if (diag_is_empty()) {
+                            raze_diag_set("failed parsing %s at offset %llu in '%s'",
+                                          header_type_name(block.header_type),
+                                          (unsigned long long)block.header_offset,
+                                          volumes.paths[volume_index]);
+                        }
                         free(buf);
                         goto cleanup;
                     }
                     if (!skip_forward(file, block.data_size)) {
+                        raze_diag_set("cannot skip payload for %s at offset %llu in '%s'",
+                                      header_type_name(block.header_type),
+                                      (unsigned long long)block.header_offset,
+                                      volumes.paths[volume_index]);
                         status = RAZE_STATUS_BAD_ARCHIVE;
                         free(buf);
                         goto cleanup;
@@ -1323,6 +1431,10 @@ RazeStatus raze_extract_store_archive(
                 case RAZE_RAR5_HEAD_ENDARC:
                     saw_end = 1;
                     if (!skip_forward(file, block.data_size)) {
+                        raze_diag_set("cannot skip payload for %s at offset %llu in '%s'",
+                                      header_type_name(block.header_type),
+                                      (unsigned long long)block.header_offset,
+                                      volumes.paths[volume_index]);
                         status = RAZE_STATUS_BAD_ARCHIVE;
                         free(buf);
                         goto cleanup;
@@ -1331,6 +1443,10 @@ RazeStatus raze_extract_store_archive(
                     break;
                 default:
                     if (!skip_forward(file, block.data_size)) {
+                        raze_diag_set("cannot skip payload for %s at offset %llu in '%s'",
+                                      header_type_name(block.header_type),
+                                      (unsigned long long)block.header_offset,
+                                      volumes.paths[volume_index]);
                         status = RAZE_STATUS_BAD_ARCHIVE;
                         free(buf);
                         goto cleanup;
@@ -1350,10 +1466,13 @@ RazeStatus raze_extract_store_archive(
         }
 
         if (!saw_main_in_volume) {
+            raze_diag_set("volume '%s' is missing main header", volumes.paths[volume_index]);
             status = RAZE_STATUS_BAD_ARCHIVE;
             goto cleanup;
         }
         if (pending_split.active && volume_index + 1U >= volumes.count) {
+            raze_diag_set("missing next volume while assembling split file after '%s'",
+                          volumes.paths[volume_index]);
             status = RAZE_STATUS_IO;
             goto cleanup;
         }
@@ -1363,10 +1482,12 @@ RazeStatus raze_extract_store_archive(
     }
 
     if (!saw_main || !saw_end) {
+        raze_diag_set("archive is missing required main/end headers");
         status = RAZE_STATUS_BAD_ARCHIVE;
         goto cleanup;
     }
     if (archive_is_multivolume && volumes.count == 1U) {
+        raze_diag_set("archive declares multivolume but only one volume was found");
         status = RAZE_STATUS_IO;
         goto cleanup;
     }

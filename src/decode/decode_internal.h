@@ -3,6 +3,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <stdarg.h>
 
 #include "raze/raze.h"
 
@@ -79,5 +80,6 @@ RazeStatus raze_extract_store_archive(
     const RazeExtractOptions *options
 );
 RazeStatus raze_list_rar5_archive(const char *archive_path, int technical);
+void raze_diag_set(const char *fmt, ...);
 
 #endif

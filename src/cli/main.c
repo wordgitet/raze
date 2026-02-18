@@ -208,23 +208,33 @@ int main(int argc, char **argv) {
         }
     }
 
-    status = raze_decoder_init(&decoder);
-    if (status != RAZE_STATUS_OK) {
-        fprintf(stderr, "raze: decoder initialization failed\n");
-        return 1;
-    }
+	status = raze_decoder_init(&decoder);
+	if (status != RAZE_STATUS_OK) {
+		const char *detail = raze_last_error_detail();
+		if (detail != 0 && detail[0] != '\0') {
+			fprintf(stderr, "raze: %s: %s\n", raze_status_string(status), detail);
+		} else {
+			fprintf(stderr, "raze: decoder initialization failed\n");
+		}
+		return status_to_exit_code(status);
+	}
 
     if (is_extract) {
         status = raze_decode_archive_with_options(&decoder, archive, output_dir, &options);
     } else {
         status = raze_list_archive(&decoder, archive, list_technical);
     }
-    if (status != RAZE_STATUS_OK) {
-        if (!options.quiet) {
-            fprintf(stderr, "raze: %s\n", raze_status_string(status));
-        }
-        return status_to_exit_code(status);
-    }
+	if (status != RAZE_STATUS_OK) {
+		if (!options.quiet) {
+			const char *detail = raze_last_error_detail();
+			if (detail != 0 && detail[0] != '\0') {
+				fprintf(stderr, "raze: %s: %s\n", raze_status_string(status), detail);
+			} else {
+				fprintf(stderr, "raze: %s\n", raze_status_string(status));
+			}
+		}
+		return status_to_exit_code(status);
+	}
 
     if (is_extract && options.verbose && !options.quiet) {
         printf("raze: extract complete\n");
