@@ -272,6 +272,88 @@ run_expect_exit 6 "$ROOT_DIR/raze" x -idq -o+ -pwrong -op"$TMP_DIR/out_henc_wron
 run_expect_exit 2 "$ROOT_DIR/raze" x -idq -o+ -op"$TMP_DIR/out_henc_missing" "$HENC_ARCHIVE"
 run_expect_exit 2 "$ROOT_DIR/raze" x -idq -o+ -p -op"$TMP_DIR/out_henc_prompt_missing" "$HENC_ARCHIVE"
 
+log "checking BLAKE technical list and non-split verification"
+BLAKE_SRC_DIR="$TMP_DIR/blake_src"
+BLAKE_OUT_DIR="$TMP_DIR/out_blake"
+BLAKE_ARCHIVE="$TMP_DIR/blake_fast_htb.rar"
+mkdir -p "$BLAKE_SRC_DIR/tree"
+printf 'blake fixture text\n' > "$BLAKE_SRC_DIR/tree/a.txt"
+dd if=/dev/urandom of="$BLAKE_SRC_DIR/tree/b.bin" bs=1K count=256 status=none
+(
+    cd "$BLAKE_SRC_DIR"
+    "$RAR_BIN" a -idq -ma5 -m5 -htb -s- -r "$BLAKE_ARCHIVE" .
+)
+run_expect_exit 0 "$ROOT_DIR/raze" x -idq -o+ -op"$BLAKE_OUT_DIR" "$BLAKE_ARCHIVE"
+if [[ "$(dir_hash "$BLAKE_SRC_DIR")" != "$(dir_hash "$BLAKE_OUT_DIR")" ]]; then
+    fail "blake non-split extraction hash mismatch"
+fi
+run_expect_exit 0 "$ROOT_DIR/raze" lt "$BLAKE_ARCHIVE" > "$TMP_DIR/list_blake.txt"
+if ! grep -Fq "hash_type=blake2sp" "$TMP_DIR/list_blake.txt"; then
+    fail "technical list missing blake2sp hash type"
+fi
+cp "$BLAKE_ARCHIVE" "$TMP_DIR/blake_fast_htb_corrupt.rar"
+printf '\x01' | dd of="$TMP_DIR/blake_fast_htb_corrupt.rar" bs=1 seek=8192 conv=notrunc status=none
+run_expect_exit 6 "$ROOT_DIR/raze" x -idq -o+ -op"$TMP_DIR/out_blake_corrupt" "$TMP_DIR/blake_fast_htb_corrupt.rar"
+
+log "checking split BLAKE packed-part verification"
+BLAKE_SPLIT_OUT_DIR="$TMP_DIR/out_blake_split"
+BLAKE_SPLIT_ARCHIVE="$TMP_DIR/blake_split_htb.rar"
+(
+    cd "$BLAKE_SRC_DIR"
+    "$RAR_BIN" a -idq -ma5 -m3 -htb -s- -v120k "$BLAKE_SPLIT_ARCHIVE" ./tree
+)
+run_expect_exit 0 "$ROOT_DIR/raze" x -idq -o+ -op"$BLAKE_SPLIT_OUT_DIR" "$TMP_DIR/blake_split_htb.part1.rar"
+if [[ "$(dir_hash "$BLAKE_SRC_DIR")" != "$(dir_hash "$BLAKE_SPLIT_OUT_DIR")" ]]; then
+    fail "split blake extraction hash mismatch"
+fi
+mapfile -t BLAKE_SPLIT_PARTS < <(find "$TMP_DIR" -maxdepth 1 -type f -name 'blake_split_htb.part*.rar' | sort -V)
+if [[ "${#BLAKE_SPLIT_PARTS[@]}" -lt 2 ]]; then
+    fail "split blake fixture did not produce multiple volumes"
+fi
+for part in "${BLAKE_SPLIT_PARTS[@]}"; do
+    part_base="$(basename "$part")"
+    part_suffix="${part_base#blake_split_htb.}"
+    cp "$part" "$TMP_DIR/blake_split_htb_corrupt.${part_suffix}"
+done
+printf '\x02' | dd of="$TMP_DIR/blake_split_htb_corrupt.part1.rar" bs=1 seek=32768 conv=notrunc status=none
+run_expect_exit 6 "$ROOT_DIR/raze" x -idq -o+ -op"$TMP_DIR/out_blake_split_corrupt" "$TMP_DIR/blake_split_htb_corrupt.part1.rar"
+
+log "checking encrypted BLAKE verification"
+BLAKE_ENC_OUT_DIR="$TMP_DIR/out_blake_enc"
+BLAKE_ENC_ARCHIVE="$TMP_DIR/blake_enc_htb.rar"
+(
+    cd "$BLAKE_SRC_DIR"
+    "$RAR_BIN" a -idq -ma5 -m3 -htb -s- -r -psecret "$BLAKE_ENC_ARCHIVE" .
+)
+run_expect_exit 0 "$ROOT_DIR/raze" x -idq -o+ -psecret -op"$BLAKE_ENC_OUT_DIR" "$BLAKE_ENC_ARCHIVE"
+if [[ "$(dir_hash "$BLAKE_SRC_DIR")" != "$(dir_hash "$BLAKE_ENC_OUT_DIR")" ]]; then
+    fail "encrypted blake extraction hash mismatch"
+fi
+run_expect_exit 6 "$ROOT_DIR/raze" x -idq -o+ -pwrong -op"$TMP_DIR/out_blake_enc_wrong" "$BLAKE_ENC_ARCHIVE"
+
+log "checking split + encrypted BLAKE verification"
+BLAKE_SPLIT_ENC_OUT_DIR="$TMP_DIR/out_blake_split_enc"
+BLAKE_SPLIT_ENC_ARCHIVE="$TMP_DIR/blake_split_enc_htb.rar"
+(
+    cd "$BLAKE_SRC_DIR"
+    "$RAR_BIN" a -idq -ma5 -m3 -htb -s- -v120k -r -psecret "$BLAKE_SPLIT_ENC_ARCHIVE" ./tree
+)
+run_expect_exit 0 "$ROOT_DIR/raze" x -idq -o+ -psecret -op"$BLAKE_SPLIT_ENC_OUT_DIR" "$TMP_DIR/blake_split_enc_htb.part1.rar"
+if [[ "$(dir_hash "$BLAKE_SRC_DIR")" != "$(dir_hash "$BLAKE_SPLIT_ENC_OUT_DIR")" ]]; then
+    fail "split encrypted blake extraction hash mismatch"
+fi
+mapfile -t BLAKE_SPLIT_ENC_PARTS < <(find "$TMP_DIR" -maxdepth 1 -type f -name 'blake_split_enc_htb.part*.rar' | sort -V)
+if [[ "${#BLAKE_SPLIT_ENC_PARTS[@]}" -lt 2 ]]; then
+    fail "split encrypted blake fixture did not produce multiple volumes"
+fi
+for part in "${BLAKE_SPLIT_ENC_PARTS[@]}"; do
+    part_base="$(basename "$part")"
+    part_suffix="${part_base#blake_split_enc_htb.}"
+    cp "$part" "$TMP_DIR/blake_split_enc_htb_corrupt.${part_suffix}"
+done
+printf '\x03' | dd of="$TMP_DIR/blake_split_enc_htb_corrupt.part1.rar" bs=1 seek=32768 conv=notrunc status=none
+run_expect_exit 6 "$ROOT_DIR/raze" x -idq -o+ -psecret -op"$TMP_DIR/out_blake_split_enc_corrupt" "$TMP_DIR/blake_split_enc_htb_corrupt.part1.rar"
+
 log "checking long archive path support (>1024 bytes)"
 LONG_SRC_DIR="$TMP_DIR/long_src"
 LONG_OUT_DIR="$TMP_DIR/out_long"

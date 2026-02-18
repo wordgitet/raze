@@ -38,4 +38,10 @@ int raze_rar5_crc32_to_mac(
 	uint32_t *mac_out
 );
 
+int raze_rar5_digest_to_mac(
+	const unsigned char digest_in[RAZE_RAR5_HASH_KEY_SIZE],
+	const unsigned char hash_key[RAZE_RAR5_HASH_KEY_SIZE],
+	unsigned char digest_out[RAZE_RAR5_HASH_KEY_SIZE]
+);
+
 #endif

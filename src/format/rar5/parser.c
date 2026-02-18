@@ -111,11 +111,13 @@ RazeStatus rar5_scan_archive(const char *archive_path, RazeRar5Scan *scan) {
             case RAZE_RAR5_HEAD_FILE:
             case RAZE_RAR5_HEAD_SERVICE: {
                 RazeRar5FileHeader fh;
+                RazeStatus parse_status;
 
-                if (!raze_rar5_parse_file_header(&block, buf, buf_len, &fh)) {
+                parse_status = raze_rar5_parse_file_header(&block, buf, buf_len, &fh);
+                if (parse_status != RAZE_STATUS_OK) {
                     free(buf);
                     fclose(file);
-                    return RAZE_STATUS_BAD_ARCHIVE;
+                    return parse_status;
                 }
 
                 if (fh.split_before || fh.split_after) {

@@ -10,6 +10,7 @@ Test suites for parser, decoder, and end-to-end extraction.
 - split/multivolume extraction checks (`.partN` and legacy `.r00` naming),
 - missing-volume failure behavior checks,
 - encrypted extraction checks (`-p` and `-hp`) including wrong/missing password paths,
+- BLAKE2sp (`-htb`) integrity checks for non-split, split packed-part, encrypted, and split+encrypted archives,
 - long-path regression (>1024 bytes),
 - metadata restore checks (`mtime` + mode),
 - CLI compatibility subset checks and strict switch rejection.

@@ -13,6 +13,7 @@
 #define RAZE_RAR5_HEAD_SERVICE 3U
 #define RAZE_RAR5_HEAD_CRYPT 4U
 #define RAZE_RAR5_HEAD_ENDARC 5U
+#define RAZE_RAR5_HASH_VALUE_SIZE 32U
 
 static int skip_forward(FILE *file, uint64_t bytes) {
     while (bytes > 0) {
@@ -48,11 +49,49 @@ static const char *header_type_name(uint64_t header_type)
 	}
 }
 
+static const char *hash_type_name(const RazeRar5FileHeader *fh)
+{
+	if (fh == 0 || !fh->hash_present) {
+		return "none";
+	}
+	if (fh->hash_type == RAZE_RAR5_HASH_TYPE_BLAKE2SP) {
+		return "blake2sp";
+	}
+	return "unknown";
+}
+
+static void hash_to_hex(
+	const unsigned char *hash,
+	size_t hash_len,
+	char *out,
+	size_t out_len
+)
+{
+	static const char hexdigits[] = "0123456789abcdef";
+	size_t i;
+
+	if (out == 0 || out_len == 0U) {
+		return;
+	}
+	if (hash == 0 || hash_len == 0U || out_len < (hash_len * 2U + 1U)) {
+		out[0] = '\0';
+		return;
+	}
+
+	for (i = 0; i < hash_len; ++i) {
+		out[i * 2U] = hexdigits[(hash[i] >> 4U) & 0x0fU];
+		out[i * 2U + 1U] = hexdigits[hash[i] & 0x0fU];
+	}
+	out[hash_len * 2U] = '\0';
+}
+
 static void print_entry(
     const RazeRar5FileHeader *fh,
     int technical,
     int is_service
 ) {
+    char hash_hex[RAZE_RAR5_HASH_VALUE_SIZE * 2U + 1U];
+
     if (fh == 0 || fh->name == 0) {
         return;
     }
@@ -67,8 +106,15 @@ static void print_entry(
         return;
     }
 
+    hash_to_hex(
+        fh->hash_present ? fh->hash_value : 0,
+        fh->hash_present ? RAZE_RAR5_HASH_VALUE_SIZE : 0U,
+        hash_hex,
+        sizeof(hash_hex)
+    );
+
     printf(
-        "type=%s name=%s%s method=%llu pack=%llu unp=%llu host_os=%llu split_before=%d split_after=%d\n",
+        "type=%s name=%s%s method=%llu pack=%llu unp=%llu host_os=%llu split_before=%d split_after=%d hash_type=%s hash_scope=%s hash_mac=%d hash=%s\n",
         is_service ? "service" : "file",
         fh->name,
         fh->is_dir ? "/" : "",
@@ -77,7 +123,11 @@ static void print_entry(
         (unsigned long long)fh->unp_size,
         (unsigned long long)fh->host_os,
         fh->split_before,
-        fh->split_after
+        fh->split_after,
+        hash_type_name(fh),
+        fh->hash_present ? (fh->hash_is_packed_part ? "packed-part" : "unpacked") : "none",
+        fh->crypt_use_hash_key ? 1 : 0,
+        fh->hash_present ? hash_hex : "-"
     );
 }
 
@@ -135,16 +185,26 @@ RazeStatus raze_list_rar5_archive(const char *archive_path, int technical) {
             case RAZE_RAR5_HEAD_FILE:
             case RAZE_RAR5_HEAD_SERVICE: {
                 RazeRar5FileHeader fh;
-				if (!raze_rar5_parse_file_header(&block, buf, buf_len, &fh)) {
-					raze_diag_set(
-						"malformed %s at offset %llu in '%s'",
-						header_type_name(block.header_type),
-						(unsigned long long)block.header_offset,
-						archive_path
-					);
+				status = raze_rar5_parse_file_header(&block, buf, buf_len, &fh);
+				if (status != RAZE_STATUS_OK) {
+					if (status == RAZE_STATUS_UNSUPPORTED_FEATURE) {
+						raze_diag_set(
+							"unsupported %s feature at offset %llu in '%s'",
+							header_type_name(block.header_type),
+							(unsigned long long)block.header_offset,
+							archive_path
+						);
+					} else {
+						raze_diag_set(
+							"malformed %s at offset %llu in '%s'",
+							header_type_name(block.header_type),
+							(unsigned long long)block.header_offset,
+							archive_path
+						);
+					}
 					free(buf);
 					fclose(file);
-					return RAZE_STATUS_BAD_ARCHIVE;
+					return status;
                 }
                 print_entry(&fh, technical, block.header_type == RAZE_RAR5_HEAD_SERVICE);
                 raze_rar5_file_header_free(&fh);

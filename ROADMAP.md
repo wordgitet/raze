@@ -66,7 +66,7 @@ Build a fast, modular RAR5 decompressor in C with measurable performance wins an
 - Correct extraction across mixed real-world RAR5 samples.
 - Byte-for-byte output matches `unrar` results.
 
-## Phase 4: Feature Completeness (Prioritized) - IN PROGRESS
+## Phase 4: Feature Completeness (Prioritized) - DONE
 
 ### Deliverables
 
@@ -80,18 +80,22 @@ Build a fast, modular RAR5 decompressor in C with measurable performance wins an
 - Chosen feature set is complete and documented.
 - Unsupported features fail clearly and safely.
 
-## Phase 5: Performance Pass
+## Phase 5: Performance + Full RAR5 BLAKE Integrity - IN PROGRESS
 
 ### Deliverables
 
-- Profiling runs (`perf`/sampling) on representative corpus.
-- Hot-path optimizations: copy loops, bit decode, checksum, allocation patterns.
-- Pipeline overlap where useful (read/decode/write).
-- Optional SIMD for targeted hotspots.
+- Full RAR5 `FHEXTRA_HASH` (`BLAKE2sp`) parse and list support. - DONE
+- BLAKE verification in extraction for non-split, split packed-part, encrypted, and split+encrypted archives. - DONE
+- Unknown file-hash type handling as unsupported feature (`exit 3`). - DONE
+- Benchmark script normalization (`RUNS=7`, warmup, `p50`/`p90`, target-gap reporting). - DONE
+- Preserve hard gates where already present (`bench-store`, `bench-encrypted`). - DONE
+- Performance tuning pass for remaining encrypted-path gap. - IN PROGRESS
 
 ### Exit Criteria
 
-- Measurable speedup in target scenarios with no correctness regressions.
+- `make test` stays green with BLAKE regression coverage.
+- Bench outputs are consistent and actionable across store/compressed/solid/split/encrypted.
+- Encrypted benchmark reaches target parity (<=10% gap) on this machine.
 
 ## Phase 6: Hardening
 
@@ -108,6 +112,6 @@ Build a fast, modular RAR5 decompressor in C with measurable performance wins an
 
 ## Immediate Next Steps
 
-1. Run and tune `bench-solid`, `bench-split`, and `bench-encrypted` versus `unrar` (target <=10% gap).
-2. Add more corruption/fuzz coverage around split/solid/encrypted transitions.
-3. Improve extraction diagnostics while preserving deterministic status codes.
+1. Profile and optimize encrypted decode/hash path to pass `bench-encrypted` <=10% gap.
+2. Add focused corruption/fuzz cases for encrypted split boundaries and hash extras.
+3. Continue hot-path tuning in decode/filter/write loops while keeping `make test` green.

@@ -7,6 +7,8 @@
 
 #include "raze/raze.h"
 
+#define RAZE_RAR5_HASH_TYPE_BLAKE2SP 0x00U
+
 typedef struct RazeRar5BlockHeader {
     uint64_t header_offset;
     uint64_t data_offset;
@@ -37,6 +39,7 @@ typedef struct RazeRar5FileHeader {
     uint64_t host_os;
     uint32_t unix_mtime;
     uint32_t crc32;
+    unsigned char hash_value[32];
     unsigned char crypt_salt[16];
     unsigned char crypt_initv[16];
     unsigned char crypt_psw_check[8];
@@ -47,12 +50,15 @@ typedef struct RazeRar5FileHeader {
     uint8_t crypt_use_hash_key;
     int mtime_present;
     int crc32_present;
+    int hash_present;
     int split_before;
     int split_after;
+    int hash_is_packed_part;
     int solid;
     int is_dir;
     int encrypted;
     int comp_is_v50_compat;
+    uint8_t hash_type;
 } RazeRar5FileHeader;
 
 typedef struct RazeRar5Scan {

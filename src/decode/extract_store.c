@@ -10,6 +10,7 @@
 #include <sys/types.h>
 #include <time.h>
 
+#include "../checksum/blake2sp.h"
 #include "../checksum/crc32.h"
 #include "../cli/overwrite_prompt.h"
 #include "../crypto/rar5_crypt.h"
@@ -110,6 +111,14 @@ static uint32_t read_u32le(const unsigned char raw[4]) {
            ((uint32_t)raw[1] << 8) |
            ((uint32_t)raw[2] << 16) |
            ((uint32_t)raw[3] << 24);
+}
+
+static void secure_zero(void *ptr, size_t len)
+{
+	volatile unsigned char *p = (volatile unsigned char *)ptr;
+	while (len-- > 0U) {
+		*p++ = 0U;
+	}
 }
 
 static void header_crypt_reset(HeaderCryptState *state) {
@@ -608,14 +617,94 @@ static int pending_split_ensure_capacity(PendingSplitFile *pending, size_t need)
     return 1;
 }
 
-static RazeStatus pending_split_append_data(PendingSplitFile *pending, FILE *archive, uint64_t bytes) {
+static RazeStatus pending_split_append_data(
+    PendingSplitFile *pending,
+    FILE *archive,
+    uint64_t bytes,
+    const RazeRar5FileHeader *part_header,
+    const RazeExtractOptions *options
+) {
     unsigned char chunk[1U << 16];
+    int verify_hash;
+    int use_hash_key = 0;
+    RazeBlake2spState blake_state;
+    unsigned char actual_hash[RAZE_BLAKE2SP_DIGEST_SIZE];
+    unsigned char mac_hash[RAZE_BLAKE2SP_DIGEST_SIZE];
+    const unsigned char *compare_hash = actual_hash;
+    unsigned char key[RAZE_RAR5_KEY_SIZE];
+    unsigned char hash_key[RAZE_RAR5_HASH_KEY_SIZE];
+    unsigned char psw_value[RAZE_RAR5_KEY_SIZE];
+    unsigned char calc_psw_check[RAZE_RAR5_PSWCHECK_SIZE];
+    unsigned char calc_psw_check_csum[RAZE_RAR5_PSWCHECK_CSUM_SIZE];
 
-    if (pending == 0 || archive == 0) {
+    if (pending == 0 || archive == 0 || part_header == 0) {
         return RAZE_STATUS_BAD_ARGUMENT;
     }
     if (!pending->active) {
         return RAZE_STATUS_BAD_ARCHIVE;
+    }
+
+    memset(actual_hash, 0, sizeof(actual_hash));
+    memset(mac_hash, 0, sizeof(mac_hash));
+    memset(key, 0, sizeof(key));
+    memset(hash_key, 0, sizeof(hash_key));
+    memset(psw_value, 0, sizeof(psw_value));
+    memset(calc_psw_check, 0, sizeof(calc_psw_check));
+    memset(calc_psw_check_csum, 0, sizeof(calc_psw_check_csum));
+
+    verify_hash = part_header->hash_present && part_header->hash_is_packed_part;
+    if (verify_hash) {
+        if (part_header->hash_type != RAZE_RAR5_HASH_TYPE_BLAKE2SP) {
+            return RAZE_STATUS_UNSUPPORTED_FEATURE;
+        }
+        raze_blake2sp_init(&blake_state);
+        if (part_header->crypt_use_hash_key) {
+            if (options == 0 || !options->password_present ||
+                options->password == 0 || options->password[0] == '\0') {
+                return RAZE_STATUS_BAD_ARGUMENT;
+            }
+            if (!raze_rar5_kdf_derive(
+                    options->password,
+                    part_header->crypt_salt,
+                    part_header->crypt_lg2_count,
+                    key,
+                    hash_key,
+                    psw_value
+                )) {
+                secure_zero(key, sizeof(key));
+                secure_zero(hash_key, sizeof(hash_key));
+                secure_zero(psw_value, sizeof(psw_value));
+                return RAZE_STATUS_UNSUPPORTED_FEATURE;
+            }
+            if (part_header->crypt_use_psw_check &&
+                raze_rar5_pswcheck_validate(
+                    part_header->crypt_psw_check,
+                    part_header->crypt_psw_check_csum
+                )) {
+                if (!raze_rar5_pswcheck_from_value(
+                        psw_value,
+                        calc_psw_check,
+                        calc_psw_check_csum
+                    )) {
+                    secure_zero(key, sizeof(key));
+                    secure_zero(hash_key, sizeof(hash_key));
+                    secure_zero(psw_value, sizeof(psw_value));
+                    secure_zero(calc_psw_check, sizeof(calc_psw_check));
+                    secure_zero(calc_psw_check_csum, sizeof(calc_psw_check_csum));
+                    return RAZE_STATUS_UNSUPPORTED_FEATURE;
+                }
+                if (memcmp(calc_psw_check, part_header->crypt_psw_check,
+                           RAZE_RAR5_PSWCHECK_SIZE) != 0) {
+                    secure_zero(key, sizeof(key));
+                    secure_zero(hash_key, sizeof(hash_key));
+                    secure_zero(psw_value, sizeof(psw_value));
+                    secure_zero(calc_psw_check, sizeof(calc_psw_check));
+                    secure_zero(calc_psw_check_csum, sizeof(calc_psw_check_csum));
+                    return RAZE_STATUS_CRC_MISMATCH;
+                }
+            }
+            use_hash_key = 1;
+        }
     }
 
     while (bytes > 0) {
@@ -628,16 +717,35 @@ static RazeStatus pending_split_append_data(PendingSplitFile *pending, FILE *arc
 
         nread = fread(chunk, 1, want, archive);
         if (nread == 0) {
+            secure_zero(key, sizeof(key));
+            secure_zero(hash_key, sizeof(hash_key));
+            secure_zero(psw_value, sizeof(psw_value));
+            secure_zero(calc_psw_check, sizeof(calc_psw_check));
+            secure_zero(calc_psw_check_csum, sizeof(calc_psw_check_csum));
             if (feof(archive)) {
                 return RAZE_STATUS_IO;
             }
             return RAZE_STATUS_IO;
         }
 
+        if (verify_hash) {
+            raze_blake2sp_update(&blake_state, chunk, nread);
+        }
+
         if (pending->packed_size > SIZE_MAX - nread) {
+            secure_zero(key, sizeof(key));
+            secure_zero(hash_key, sizeof(hash_key));
+            secure_zero(psw_value, sizeof(psw_value));
+            secure_zero(calc_psw_check, sizeof(calc_psw_check));
+            secure_zero(calc_psw_check_csum, sizeof(calc_psw_check_csum));
             return RAZE_STATUS_UNSUPPORTED_FEATURE;
         }
         if (!pending_split_ensure_capacity(pending, pending->packed_size + nread)) {
+            secure_zero(key, sizeof(key));
+            secure_zero(hash_key, sizeof(hash_key));
+            secure_zero(psw_value, sizeof(psw_value));
+            secure_zero(calc_psw_check, sizeof(calc_psw_check));
+            secure_zero(calc_psw_check_csum, sizeof(calc_psw_check_csum));
             return RAZE_STATUS_IO;
         }
         memcpy(pending->packed_data + pending->packed_size, chunk, nread);
@@ -645,6 +753,34 @@ static RazeStatus pending_split_append_data(PendingSplitFile *pending, FILE *arc
         bytes -= (uint64_t)nread;
     }
 
+    if (verify_hash) {
+        raze_blake2sp_final(&blake_state, actual_hash);
+        if (use_hash_key) {
+            if (!raze_rar5_digest_to_mac(actual_hash, hash_key, mac_hash)) {
+                secure_zero(key, sizeof(key));
+                secure_zero(hash_key, sizeof(hash_key));
+                secure_zero(psw_value, sizeof(psw_value));
+                secure_zero(calc_psw_check, sizeof(calc_psw_check));
+                secure_zero(calc_psw_check_csum, sizeof(calc_psw_check_csum));
+                return RAZE_STATUS_UNSUPPORTED_FEATURE;
+            }
+            compare_hash = mac_hash;
+        }
+        if (memcmp(compare_hash, part_header->hash_value, RAZE_BLAKE2SP_DIGEST_SIZE) != 0) {
+            secure_zero(key, sizeof(key));
+            secure_zero(hash_key, sizeof(hash_key));
+            secure_zero(psw_value, sizeof(psw_value));
+            secure_zero(calc_psw_check, sizeof(calc_psw_check));
+            secure_zero(calc_psw_check_csum, sizeof(calc_psw_check_csum));
+            return RAZE_STATUS_CRC_MISMATCH;
+        }
+    }
+
+    secure_zero(key, sizeof(key));
+    secure_zero(hash_key, sizeof(hash_key));
+    secure_zero(psw_value, sizeof(psw_value));
+    secure_zero(calc_psw_check, sizeof(calc_psw_check));
+    secure_zero(calc_psw_check_csum, sizeof(calc_psw_check_csum));
     pending->header.pack_size = pending->packed_size;
     return RAZE_STATUS_OK;
 }
@@ -669,6 +805,14 @@ static int pending_split_headers_compatible(
         return 0;
     }
     if (pending->header.is_dir != part->is_dir) {
+        return 0;
+    }
+    if (pending->header.encrypted != part->encrypted ||
+        pending->header.crypt_version != part->crypt_version ||
+        pending->header.crypt_lg2_count != part->crypt_lg2_count) {
+        return 0;
+    }
+    if (memcmp(pending->header.crypt_salt, part->crypt_salt, sizeof(part->crypt_salt)) != 0) {
         return 0;
     }
     return 1;
@@ -749,11 +893,29 @@ static RazeStatus copy_store_payload(
     FILE *output,
     uint64_t size,
     int crc32_present,
-    uint32_t expected_crc32
+    uint32_t expected_crc32,
+    int hash_present,
+    uint8_t hash_type,
+    const unsigned char expected_hash[RAZE_BLAKE2SP_DIGEST_SIZE],
+    int use_hash_key,
+    const unsigned char *hash_key
 ) {
     unsigned char buf[1U << 16];
     uint64_t remaining = size;
     uint32_t crc = raze_crc32_init();
+    RazeBlake2spState blake_state;
+    unsigned char actual_hash[RAZE_BLAKE2SP_DIGEST_SIZE];
+    unsigned char mac_hash[RAZE_BLAKE2SP_DIGEST_SIZE];
+    const unsigned char *compare_hash = actual_hash;
+
+    memset(actual_hash, 0, sizeof(actual_hash));
+    memset(mac_hash, 0, sizeof(mac_hash));
+    if (hash_present) {
+        if (hash_type != RAZE_RAR5_HASH_TYPE_BLAKE2SP) {
+            return RAZE_STATUS_UNSUPPORTED_FEATURE;
+        }
+        raze_blake2sp_init(&blake_state);
+    }
 
     while (remaining > 0) {
         size_t want = sizeof(buf);
@@ -780,12 +942,27 @@ static RazeStatus copy_store_payload(
         }
 
         crc = raze_crc32_update(crc, buf, nread);
+        if (hash_present) {
+            raze_blake2sp_update(&blake_state, buf, nread);
+        }
         remaining -= (uint64_t)nread;
     }
 
     if (crc32_present) {
         uint32_t actual = raze_crc32_final(crc);
         if (actual != expected_crc32) {
+            return RAZE_STATUS_CRC_MISMATCH;
+        }
+    }
+    if (hash_present) {
+        raze_blake2sp_final(&blake_state, actual_hash);
+        if (use_hash_key) {
+            if (!raze_rar5_digest_to_mac(actual_hash, hash_key, mac_hash)) {
+                return RAZE_STATUS_UNSUPPORTED_FEATURE;
+            }
+            compare_hash = mac_hash;
+        }
+        if (memcmp(compare_hash, expected_hash, RAZE_BLAKE2SP_DIGEST_SIZE) != 0) {
             return RAZE_STATUS_CRC_MISMATCH;
         }
     }
@@ -820,7 +997,12 @@ static RazeStatus decode_payload(
 			output,
 			fh->pack_size,
 			fh->crc32_present,
-			fh->crc32
+			fh->crc32,
+			fh->hash_present,
+			fh->hash_type,
+			fh->hash_value,
+			0,
+			0
 		);
 	}
 
@@ -1024,8 +1206,9 @@ static RazeStatus handle_file_block(
 
     memset(&fh, 0, sizeof(fh));
 
-    if (!raze_rar5_parse_file_header(block, buf, buf_len, &fh)) {
-        return RAZE_STATUS_BAD_ARCHIVE;
+    status = raze_rar5_parse_file_header(block, buf, buf_len, &fh);
+    if (status != RAZE_STATUS_OK) {
+        return status;
     }
 
     status = ensure_supported_file(&fh, 0);
@@ -1124,8 +1307,9 @@ static RazeStatus handle_split_file_block(
     }
 
     memset(&fh, 0, sizeof(fh));
-    if (!raze_rar5_parse_file_header(block, buf, buf_len, &fh)) {
-        return RAZE_STATUS_BAD_ARCHIVE;
+    status = raze_rar5_parse_file_header(block, buf, buf_len, &fh);
+    if (status != RAZE_STATUS_OK) {
+        return status;
     }
 
     status = ensure_supported_file(&fh, 1);
@@ -1145,6 +1329,9 @@ static RazeStatus handle_split_file_block(
             raze_rar5_file_header_free(&fh);
             return RAZE_STATUS_IO;
         }
+        pending->header.hash_present = 0;
+        pending->header.hash_is_packed_part = 0;
+        memset(pending->header.hash_value, 0, sizeof(pending->header.hash_value));
         pending->active = 1;
         pending->packed_size = 0;
     } else {
@@ -1166,10 +1353,34 @@ static RazeStatus handle_split_file_block(
         pending->header.mtime_present = 1;
         pending->header.unix_mtime = fh.unix_mtime;
     }
+    if (fh.encrypted) {
+        pending->header.crypt_use_hash_key = fh.crypt_use_hash_key;
+        pending->header.crypt_use_psw_check = fh.crypt_use_psw_check;
+        pending->header.crypt_lg2_count = fh.crypt_lg2_count;
+        pending->header.crypt_version = fh.crypt_version;
+        memcpy(pending->header.crypt_salt, fh.crypt_salt, sizeof(fh.crypt_salt));
+        memcpy(pending->header.crypt_initv, fh.crypt_initv, sizeof(fh.crypt_initv));
+        memcpy(pending->header.crypt_psw_check, fh.crypt_psw_check, sizeof(fh.crypt_psw_check));
+        memcpy(pending->header.crypt_psw_check_csum,
+               fh.crypt_psw_check_csum,
+               sizeof(fh.crypt_psw_check_csum));
+    }
+    if (fh.hash_present && !fh.hash_is_packed_part) {
+        pending->header.hash_present = 1;
+        pending->header.hash_type = fh.hash_type;
+        pending->header.hash_is_packed_part = 0;
+        memcpy(pending->header.hash_value, fh.hash_value, sizeof(fh.hash_value));
+    }
     pending->header.split_before = 0;
     pending->header.split_after = fh.split_after ? 1 : 0;
 
-    status = pending_split_append_data(pending, archive, block->data_size);
+    status = pending_split_append_data(
+        pending,
+        archive,
+        block->data_size,
+        &fh,
+        options
+    );
     if (status != RAZE_STATUS_OK) {
         raze_rar5_file_header_free(&fh);
         return status;
@@ -1384,12 +1595,19 @@ RazeStatus raze_extract_store_archive(
                 case RAZE_RAR5_HEAD_SERVICE: {
                     RazeRar5FileHeader service_header;
                     memset(&service_header, 0, sizeof(service_header));
-                    if (!raze_rar5_parse_file_header(&block, buf, buf_len, &service_header)) {
-                        raze_diag_set("malformed %s at offset %llu in '%s'",
-                                      header_type_name(block.header_type),
-                                      (unsigned long long)block.header_offset,
-                                      volumes.paths[volume_index]);
-                        status = RAZE_STATUS_BAD_ARCHIVE;
+                    status = raze_rar5_parse_file_header(&block, buf, buf_len, &service_header);
+                    if (status != RAZE_STATUS_OK) {
+                        if (status == RAZE_STATUS_UNSUPPORTED_FEATURE) {
+                            raze_diag_set("unsupported %s feature at offset %llu in '%s'",
+                                          header_type_name(block.header_type),
+                                          (unsigned long long)block.header_offset,
+                                          volumes.paths[volume_index]);
+                        } else {
+                            raze_diag_set("malformed %s at offset %llu in '%s'",
+                                          header_type_name(block.header_type),
+                                          (unsigned long long)block.header_offset,
+                                          volumes.paths[volume_index]);
+                        }
                         free(buf);
                         goto cleanup;
                     }

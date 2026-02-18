@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "../checksum/blake2sp.h"
 #include "../checksum/crc32.h"
 #include "../crypto/rar5_crypt.h"
 #include "../crypto/rar5_kdf.h"
@@ -101,12 +102,28 @@ static RazeStatus write_or_verify_payload(
 	size_t size,
 	int crc32_present,
 	uint32_t expected_crc32,
+	int hash_present,
+	uint8_t hash_type,
+	const unsigned char expected_hash[RAZE_BLAKE2SP_DIGEST_SIZE],
 	int use_hash_key,
 	const unsigned char *hash_key
 )
 {
 	size_t offset = 0;
 	uint32_t crc = raze_crc32_init();
+	RazeBlake2spState blake_state;
+	unsigned char actual_hash[RAZE_BLAKE2SP_DIGEST_SIZE];
+	unsigned char mac_hash[RAZE_BLAKE2SP_DIGEST_SIZE];
+	const unsigned char *compare_hash = actual_hash;
+
+	memset(actual_hash, 0, sizeof(actual_hash));
+	memset(mac_hash, 0, sizeof(mac_hash));
+	if (hash_present) {
+		if (hash_type != RAZE_RAR5_HASH_TYPE_BLAKE2SP) {
+			return RAZE_STATUS_UNSUPPORTED_FEATURE;
+		}
+		raze_blake2sp_init(&blake_state);
+	}
 
 	while (offset < size) {
 		size_t chunk = size - offset;
@@ -120,6 +137,9 @@ static RazeStatus write_or_verify_payload(
 		}
 		if (crc32_present) {
 			crc = raze_crc32_update(crc, buf + offset, nwritten);
+		}
+		if (hash_present) {
+			raze_blake2sp_update(&blake_state, buf + offset, nwritten);
 		}
 		offset += nwritten;
 	}
@@ -135,29 +155,45 @@ static RazeStatus write_or_verify_payload(
 			return RAZE_STATUS_CRC_MISMATCH;
 		}
 	}
+	if (hash_present) {
+		raze_blake2sp_final(&blake_state, actual_hash);
+		if (use_hash_key) {
+			if (!raze_rar5_digest_to_mac(actual_hash, hash_key, mac_hash)) {
+				return RAZE_STATUS_UNSUPPORTED_FEATURE;
+			}
+			compare_hash = mac_hash;
+		}
+		if (memcmp(compare_hash, expected_hash, RAZE_BLAKE2SP_DIGEST_SIZE) != 0) {
+			return RAZE_STATUS_CRC_MISMATCH;
+		}
+	}
 
 	return RAZE_STATUS_OK;
 }
 
-static RazeStatus verify_empty_crc32(
-	uint32_t expected_crc,
+static RazeStatus verify_empty_integrity(
+	const RazeRar5FileHeader *fh,
 	int use_hash_key,
 	const unsigned char *hash_key
 )
 {
-	uint32_t crc = raze_crc32_init();
-	uint32_t actual = raze_crc32_final(crc);
+	unsigned char zero = 0;
 
-	if (use_hash_key) {
-		if (!raze_rar5_crc32_to_mac(actual, hash_key, &actual)) {
-			return RAZE_STATUS_UNSUPPORTED_FEATURE;
-		}
+	if (fh == 0) {
+		return RAZE_STATUS_BAD_ARGUMENT;
 	}
-	if (actual != expected_crc) {
-		return RAZE_STATUS_CRC_MISMATCH;
-	}
-
-	return RAZE_STATUS_OK;
+	return write_or_verify_payload(
+		0,
+		&zero,
+		0,
+		fh->crc32_present,
+		fh->crc32,
+		fh->hash_present,
+		fh->hash_type,
+		fh->hash_value,
+		use_hash_key,
+		hash_key
+	);
 }
 
 static RazeStatus decrypt_packed_payload_if_needed(
@@ -281,10 +317,7 @@ RazeStatus raze_extract_compressed_payload(
 	packed_alloc_size = packed_size + 8U;
 
 	if (packed_size == 0 && unpacked_size == 0) {
-		if (fh->crc32_present) {
-			return verify_empty_crc32(fh->crc32, 0, 0);
-		}
-		return RAZE_STATUS_OK;
+		return verify_empty_integrity(fh, 0, 0);
 	}
 	if (packed_size == 0) {
 		return RAZE_STATUS_BAD_ARCHIVE;
@@ -369,6 +402,9 @@ RazeStatus raze_extract_compressed_payload(
 			unpacked_size,
 			fh->crc32_present,
 			fh->crc32,
+			fh->hash_present,
+			fh->hash_type,
+			fh->hash_value,
 			use_hash_key,
 			hash_key
 		);
@@ -414,6 +450,9 @@ RazeStatus raze_extract_compressed_payload(
 		unpacked_size,
 		fh->crc32_present,
 		fh->crc32,
+		fh->hash_present,
+		fh->hash_type,
+		fh->hash_value,
 		use_hash_key,
 		hash_key
 	);

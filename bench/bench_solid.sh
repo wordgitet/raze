@@ -19,6 +19,10 @@ fail() {
     exit 1
 }
 
+warn() {
+    printf '[bench-solid] warning: %s\n' "$*" >&2
+}
+
 median_from_stdin() {
     awk '
         { values[++count] = $1 }
@@ -145,4 +149,7 @@ for archive in "${ARCHIVES[@]}"; do
     gap_pct="$(awk -v r="$raze_median" -v u="$unrar_median" 'BEGIN { printf "%.2f", ((r - u) / u) * 100.0 }')"
 
     log "$(basename "$archive"): raze p50=${raze_median}s p90=${raze_p90}s (${raze_mbps} MiB/s), unrar p50=${unrar_median}s p90=${unrar_p90}s (${unrar_mbps} MiB/s), gap=${gap_pct}%"
+    if awk -v g="$gap_pct" 'BEGIN { exit !(g > 10.0) }'; then
+        warn "$(basename "$archive") is outside target (>10% slower than unrar)"
+    fi
 done

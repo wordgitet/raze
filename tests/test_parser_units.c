@@ -44,6 +44,8 @@ static int build_file_header_payload(
     uint64_t comp_info,
     int bad_name_len,
     int add_crypt_extra,
+    int add_hash_extra,
+    uint64_t hash_type,
     size_t *payload_len
 ) {
     const char name[] = "file.txt";
@@ -91,36 +93,51 @@ static int build_file_header_payload(
     block->data_size = 11U;
     block->body_offset = 0U;
 
-    if (add_crypt_extra) {
+    if (add_crypt_extra || add_hash_extra) {
         size_t extra_start = cursor;
-        size_t field_size_pos;
-        size_t payload_start;
-
-        if (cursor + 64U > buf_cap) {
-            return 0;
-        }
         block->flags = 0x0001U;
         block->extra_offset = cursor;
+        if (add_crypt_extra) {
+            size_t field_size_pos = cursor++;
+            size_t field_start = cursor;
 
-        field_size_pos = cursor++;
-        if (!append_vint(buf, buf_cap, &cursor, 0x01U)) {
-            return 0;
-        }
+            if (!append_vint(buf, buf_cap, &cursor, 0x01U)) {
+                return 0;
+            }
+            if (!append_vint(buf, buf_cap, &cursor, 0U)) {
+                return 0;
+            }
+            if (!append_vint(buf, buf_cap, &cursor, 0U)) {
+                return 0;
+            }
+            if (cursor + 1U + 16U + 16U > buf_cap) {
+                return 0;
+            }
+            buf[cursor++] = 15U;
+            memset(buf + cursor, 0x11, 16U);
+            cursor += 16U;
+            memset(buf + cursor, 0x22, 16U);
+            cursor += 16U;
 
-        payload_start = cursor;
-        if (!append_vint(buf, buf_cap, &cursor, 0U)) {
-            return 0;
+            buf[field_size_pos] = (unsigned char)(cursor - field_start);
         }
-        if (!append_vint(buf, buf_cap, &cursor, 0U)) {
-            return 0;
-        }
-        buf[cursor++] = 15U;
-        memset(buf + cursor, 0x11, 16U);
-        cursor += 16U;
-        memset(buf + cursor, 0x22, 16U);
-        cursor += 16U;
+        if (add_hash_extra) {
+            size_t field_size_pos = cursor++;
+            size_t field_start = cursor;
 
-        buf[field_size_pos] = (unsigned char)(1U + (cursor - payload_start));
+            if (!append_vint(buf, buf_cap, &cursor, 0x02U)) {
+                return 0;
+            }
+            if (!append_vint(buf, buf_cap, &cursor, hash_type)) {
+                return 0;
+            }
+            if (cursor + 32U > buf_cap) {
+                return 0;
+            }
+            memset(buf + cursor, 0x33, 32U);
+            cursor += 32U;
+            buf[field_size_pos] = (unsigned char)(cursor - field_start);
+        }
         block->extra_size = cursor - extra_start;
     } else {
         block->extra_offset = cursor;
@@ -293,11 +310,11 @@ static int test_file_header_valid(void) {
     RazeRar5FileHeader fh;
     int ok = 0;
 
-    if (!build_file_header_payload(payload, sizeof(payload), &block, 0U, 0, 0, &payload_len)) {
+    if (!build_file_header_payload(payload, sizeof(payload), &block, 0U, 0, 0, 0, 0U, &payload_len)) {
         return 0;
     }
 
-    if (!raze_rar5_parse_file_header(&block, payload, payload_len, &fh)) {
+    if (raze_rar5_parse_file_header(&block, payload, payload_len, &fh) != RAZE_STATUS_OK) {
         return 0;
     }
 
@@ -325,11 +342,11 @@ static int test_file_header_truncated(void) {
     RazeRar5BlockHeader block;
     RazeRar5FileHeader fh;
 
-    if (!build_file_header_payload(payload, sizeof(payload), &block, 0U, 0, 0, &payload_len)) {
+    if (!build_file_header_payload(payload, sizeof(payload), &block, 0U, 0, 0, 0, 0U, &payload_len)) {
         return 0;
     }
 
-    return !raze_rar5_parse_file_header(&block, payload, payload_len - 1U, &fh);
+    return raze_rar5_parse_file_header(&block, payload, payload_len - 1U, &fh) == RAZE_STATUS_BAD_ARCHIVE;
 }
 
 static int test_file_header_bad_name_len(void) {
@@ -338,11 +355,11 @@ static int test_file_header_bad_name_len(void) {
     RazeRar5BlockHeader block;
     RazeRar5FileHeader fh;
 
-    if (!build_file_header_payload(payload, sizeof(payload), &block, 0U, 1, 0, &payload_len)) {
+    if (!build_file_header_payload(payload, sizeof(payload), &block, 0U, 1, 0, 0, 0U, &payload_len)) {
         return 0;
     }
 
-    return !raze_rar5_parse_file_header(&block, payload, payload_len, &fh);
+    return raze_rar5_parse_file_header(&block, payload, payload_len, &fh) == RAZE_STATUS_BAD_ARCHIVE;
 }
 
 static int test_file_header_crypt_extra(void) {
@@ -352,11 +369,11 @@ static int test_file_header_crypt_extra(void) {
     RazeRar5FileHeader fh;
     int ok = 0;
 
-    if (!build_file_header_payload(payload, sizeof(payload), &block, 0U, 0, 1, &payload_len)) {
+    if (!build_file_header_payload(payload, sizeof(payload), &block, 0U, 0, 1, 0, 0U, &payload_len)) {
         return 0;
     }
 
-    if (!raze_rar5_parse_file_header(&block, payload, payload_len, &fh)) {
+    if (raze_rar5_parse_file_header(&block, payload, payload_len, &fh) != RAZE_STATUS_OK) {
         return 0;
     }
 
@@ -420,10 +437,10 @@ static int test_file_header_v70_dict_info(void) {
 	comp_info |= 4U << 10U;
 	comp_info |= 16U << 15U;
 
-	if (!build_file_header_payload(payload, sizeof(payload), &block, comp_info, 0, 0, &payload_len)) {
+	if (!build_file_header_payload(payload, sizeof(payload), &block, comp_info, 0, 0, 0, 0U, &payload_len)) {
 		return 0;
 	}
-	if (!raze_rar5_parse_file_header(&block, payload, payload_len, &fh)) {
+	if (raze_rar5_parse_file_header(&block, payload, payload_len, &fh) != RAZE_STATUS_OK) {
 		return 0;
 	}
 
@@ -447,11 +464,66 @@ static int test_file_header_invalid_comp_info(void) {
 
 	comp_info = 0U;
 	comp_info |= 1U << 15U;
-	if (!build_file_header_payload(payload, sizeof(payload), &block, comp_info, 0, 0, &payload_len)) {
+	if (!build_file_header_payload(payload, sizeof(payload), &block, comp_info, 0, 0, 0, 0U, &payload_len)) {
 		return 0;
 	}
 
-	return !raze_rar5_parse_file_header(&block, payload, payload_len, &fh);
+	return raze_rar5_parse_file_header(&block, payload, payload_len, &fh) == RAZE_STATUS_BAD_ARCHIVE;
+}
+
+static int test_file_header_hash_extra(void) {
+	unsigned char payload[256];
+	size_t payload_len = 0;
+	RazeRar5BlockHeader block;
+	RazeRar5FileHeader fh;
+	int ok = 0;
+
+	if (!build_file_header_payload(payload, sizeof(payload), &block, 0U, 0, 0, 1, 0U, &payload_len)) {
+		return 0;
+	}
+	if (raze_rar5_parse_file_header(&block, payload, payload_len, &fh) != RAZE_STATUS_OK) {
+		return 0;
+	}
+
+	ok = fh.hash_present == 1 &&
+	     fh.hash_type == RAZE_RAR5_HASH_TYPE_BLAKE2SP &&
+	     fh.hash_is_packed_part == 0 &&
+	     fh.hash_value[0] == 0x33;
+	raze_rar5_file_header_free(&fh);
+	return ok;
+}
+
+static int test_file_header_unknown_hash_type(void) {
+	unsigned char payload[256];
+	size_t payload_len = 0;
+	RazeRar5BlockHeader block;
+	RazeRar5FileHeader fh;
+
+	if (!build_file_header_payload(payload, sizeof(payload), &block, 0U, 0, 0, 1, 0x7fU, &payload_len)) {
+		return 0;
+	}
+
+	return raze_rar5_parse_file_header(&block, payload, payload_len, &fh) ==
+	       RAZE_STATUS_UNSUPPORTED_FEATURE;
+}
+
+static int test_file_header_hash_scope_split_part(void) {
+	unsigned char payload[256];
+	size_t payload_len = 0;
+	RazeRar5BlockHeader block;
+	RazeRar5FileHeader fh;
+	int ok = 0;
+
+	if (!build_file_header_payload(payload, sizeof(payload), &block, 0U, 0, 0, 1, 0U, &payload_len)) {
+		return 0;
+	}
+	block.flags |= 0x0010U;
+	if (raze_rar5_parse_file_header(&block, payload, payload_len, &fh) != RAZE_STATUS_OK) {
+		return 0;
+	}
+	ok = fh.hash_present == 1 && fh.hash_is_packed_part == 1;
+	raze_rar5_file_header_free(&fh);
+	return ok;
 }
 
 int main(void) {
@@ -493,6 +565,15 @@ int main(void) {
     }
     if (!test_file_header_invalid_comp_info()) {
         return 13;
+    }
+    if (!test_file_header_hash_extra()) {
+        return 14;
+    }
+    if (!test_file_header_unknown_hash_type()) {
+        return 15;
+    }
+    if (!test_file_header_hash_scope_split_part()) {
+        return 16;
     }
     return 0;
 }

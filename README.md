@@ -85,6 +85,12 @@ Scripts detect already downloaded/generated artifacts and skip unnecessary work.
   - solid streams,
   - split/multivolume chains (`.partN.rar` and `.rar/.r00/.r01...`),
   - encrypted data (`-p`) and encrypted headers (`-hp`) when built with OpenSSL.
+- RAR5 `-htb` integrity is verified for:
+  - non-split entries (stored and compressed),
+  - split packed parts (`Pack-BLAKE2`),
+  - encrypted entries (`BLAKE2 MAC` when hash-key mode is present).
+- If both CRC32 and BLAKE2sp are present, both must pass.
+- Unknown file-hash types fail with unsupported-feature status (`exit 3`).
 - `mtime` and mode are restored for files and directories when available.
 - Metadata apply errors are warnings (non-fatal), while data corruption and I/O errors remain fatal.
 - Wrong password returns checksum-class failure (`exit 6`).

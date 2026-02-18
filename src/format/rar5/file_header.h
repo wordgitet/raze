@@ -13,7 +13,7 @@
 #define RAZE_RAR5_FHFL_CRC32 0x0004U
 #define RAZE_RAR5_FHFL_UNPUNKNOWN 0x0008U
 
-int raze_rar5_parse_file_header(
+RazeStatus raze_rar5_parse_file_header(
     const RazeRar5BlockHeader *block,
     const unsigned char *buf,
     size_t buf_len,

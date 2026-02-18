@@ -353,3 +353,29 @@ int raze_rar5_crc32_to_mac(
 	return 0;
 #endif
 }
+
+int raze_rar5_digest_to_mac(
+	const unsigned char digest_in[RAZE_RAR5_HASH_KEY_SIZE],
+	const unsigned char hash_key[RAZE_RAR5_HASH_KEY_SIZE],
+	unsigned char digest_out[RAZE_RAR5_HASH_KEY_SIZE]
+)
+{
+#if defined(RAZE_HAVE_OPENSSL) && RAZE_HAVE_OPENSSL
+	if (digest_in == 0 || hash_key == 0 || digest_out == 0) {
+		return 0;
+	}
+
+	return hmac_sha256(
+		hash_key,
+		RAZE_RAR5_HASH_KEY_SIZE,
+		digest_in,
+		RAZE_RAR5_HASH_KEY_SIZE,
+		digest_out
+	);
+#else
+	(void)digest_in;
+	(void)hash_key;
+	(void)digest_out;
+	return 0;
+#endif
+}
