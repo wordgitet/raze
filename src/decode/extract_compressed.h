@@ -9,8 +9,6 @@
 typedef struct RazeCompressedScratch {
 	unsigned char *packed;
 	size_t packed_capacity;
-	unsigned char *decrypted_packed;
-	size_t decrypted_packed_capacity;
 	unsigned char *unpacked;
 	size_t unpacked_capacity;
 	RazeRar5UnpackCtx unpack_ctx;
