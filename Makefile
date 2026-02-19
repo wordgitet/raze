@@ -1,6 +1,13 @@
-CC := cc
-CFLAGS := -std=c11 -O2 -Wall -Wextra -Wpedantic -MMD -MP -Iinclude
-LDFLAGS :=
+CC ?= cc
+TARGET ?= raze
+BUILD_DIR ?= build
+USE_ISAL ?= 1
+SANITIZE ?=
+RUN_SECS ?= 30
+
+BASE_CFLAGS := -std=c11 -O2 -Wall -Wextra -Wpedantic -MMD -MP -Iinclude
+CFLAGS := $(BASE_CFLAGS) $(EXTRA_CFLAGS)
+LDFLAGS := $(EXTRA_LDFLAGS)
 
 OPENSSL_CFLAGS := $(shell pkg-config --cflags openssl 2>/dev/null)
 OPENSSL_LIBS := $(shell pkg-config --libs openssl 2>/dev/null)
@@ -10,23 +17,52 @@ CFLAGS += $(OPENSSL_CFLAGS) -DRAZE_HAVE_OPENSSL=1
 LDFLAGS += $(OPENSSL_LIBS)
 endif
 
-TARGET := raze
-BUILD_DIR := build
+ifneq ($(strip $(SANITIZE)),)
+SAN_FLAGS := -fsanitize=$(SANITIZE) -fno-omit-frame-pointer -O1 -g3
+CFLAGS += $(SAN_FLAGS)
+LDFLAGS += $(SAN_FLAGS)
+endif
+
+TEST_EXTRA_CFLAGS := $(EXTRA_CFLAGS) $(SAN_FLAGS)
+TEST_EXTRA_LDFLAGS := $(EXTRA_LDFLAGS) $(SAN_FLAGS)
+
 ISAL_DIR := third_party/isa-l
 ISAL_LIB := $(ISAL_DIR)/bin/isa-l.a
 ISAL_MAKEFILE := $(ISAL_DIR)/Makefile.unx
 
+ifneq ($(USE_ISAL),0)
 ifneq ($(wildcard $(ISAL_MAKEFILE)),)
 CFLAGS += -I$(ISAL_DIR)/include -DRAZE_USE_ISAL=1
 LDFLAGS += $(ISAL_LIB)
 ISAL_PREREQ := $(ISAL_LIB)
 endif
+endif
+
+FUZZ_CC ?= clang
+FUZZ_BUILD_DIR ?= $(BUILD_DIR)/fuzz
+FUZZ_SAN_FLAGS ?= -fsanitize=fuzzer,address,undefined
+FUZZ_CFLAGS := -std=c11 -O1 -g3 -Wall -Wextra -Wpedantic -Iinclude $(EXTRA_CFLAGS) $(FUZZ_SAN_FLAGS)
+FUZZ_LDFLAGS := $(EXTRA_LDFLAGS) $(FUZZ_SAN_FLAGS)
+
+ifneq ($(USE_ISAL),0)
+ifneq ($(wildcard $(ISAL_MAKEFILE)),)
+FUZZ_CFLAGS += -I$(ISAL_DIR)/include -DRAZE_USE_ISAL=1
+FUZZ_LDFLAGS += $(ISAL_LIB)
+FUZZ_ISAL_PREREQ := $(ISAL_LIB)
+endif
+endif
+
+FUZZ_TARGETS := \
+	$(FUZZ_BUILD_DIR)/fuzz_vint \
+	$(FUZZ_BUILD_DIR)/fuzz_block_reader \
+	$(FUZZ_BUILD_DIR)/fuzz_file_header \
+	$(FUZZ_BUILD_DIR)/fuzz_unpack_v50
 
 SRCS := $(shell find src -type f -name '*.c' | sort)
 OBJS := $(patsubst %.c,$(BUILD_DIR)/%.o,$(SRCS))
 DEPS := $(OBJS:.o=.d)
 
-.PHONY: all clean run test bench-store bench-compressed bench-solid bench-split bench-encrypted corpus corpus-fetch corpus-local corpus-themed
+.PHONY: all clean run test test-parser-units test-asan-ubsan fuzz-build fuzz-smoke bench-store bench-compressed bench-solid bench-split bench-encrypted corpus corpus-fetch corpus-local corpus-themed
 
 all: $(TARGET)
 
@@ -44,7 +80,29 @@ run: $(TARGET)
 	./$(TARGET) --help
 
 test: $(TARGET)
+	CC="$(CC)" \
+	EXTRA_CFLAGS="$(TEST_EXTRA_CFLAGS)" \
+	EXTRA_LDFLAGS="$(TEST_EXTRA_LDFLAGS)" \
 	./tests/run_tests.sh
+
+test-parser-units:
+	./tests/test_parser_units.sh
+
+test-asan-ubsan:
+	$(MAKE) clean
+	@if command -v rar >/dev/null 2>&1; then \
+		ASAN_OPTIONS=detect_leaks=0 \
+		$(MAKE) USE_ISAL=0 SANITIZE=address,undefined test; \
+	else \
+		ASAN_OPTIONS=detect_leaks=0 \
+		$(MAKE) USE_ISAL=0 SANITIZE=address,undefined test-parser-units; \
+	fi
+	$(MAKE) clean
+
+fuzz-build: $(FUZZ_ISAL_PREREQ) $(FUZZ_TARGETS)
+
+fuzz-smoke: fuzz-build
+	./tests/fuzz/run_fuzz_smoke.sh "$(FUZZ_BUILD_DIR)" "$(RUN_SECS)"
 
 bench-store: $(TARGET)
 	./bench/bench_store.sh
@@ -74,5 +132,20 @@ corpus: corpus-fetch corpus-local corpus-themed
 
 clean:
 	rm -rf $(BUILD_DIR) $(TARGET)
+
+$(FUZZ_BUILD_DIR):
+	@mkdir -p $@
+
+$(FUZZ_BUILD_DIR)/fuzz_vint: tests/fuzz/fuzz_vint.c src/format/rar5/vint.c | $(FUZZ_BUILD_DIR)
+	$(FUZZ_CC) $(FUZZ_CFLAGS) $^ -o $@ $(FUZZ_LDFLAGS)
+
+$(FUZZ_BUILD_DIR)/fuzz_block_reader: tests/fuzz/fuzz_block_reader.c src/format/rar5/block_reader.c src/format/rar5/vint.c src/checksum/crc32.c | $(FUZZ_BUILD_DIR)
+	$(FUZZ_CC) $(FUZZ_CFLAGS) $^ -o $@ $(FUZZ_LDFLAGS)
+
+$(FUZZ_BUILD_DIR)/fuzz_file_header: tests/fuzz/fuzz_file_header.c src/format/rar5/file_header.c src/format/rar5/vint.c | $(FUZZ_BUILD_DIR)
+	$(FUZZ_CC) $(FUZZ_CFLAGS) $^ -o $@ $(FUZZ_LDFLAGS)
+
+$(FUZZ_BUILD_DIR)/fuzz_unpack_v50: tests/fuzz/fuzz_unpack_v50.c src/decode/rar5/unpack_v50.c src/decode/rar5/bit_reader.c src/decode/rar5/huff.c src/decode/rar5/filter.c src/decode/rar5/window.c | $(FUZZ_BUILD_DIR)
+	$(FUZZ_CC) $(FUZZ_CFLAGS) $^ -o $@ $(FUZZ_LDFLAGS)
 
 -include $(DEPS)

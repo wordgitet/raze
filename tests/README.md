@@ -20,3 +20,11 @@ Run:
 ```sh
 make test
 ```
+
+Hardening helpers:
+
+```sh
+make test-asan-ubsan
+make fuzz-build USE_ISAL=0
+make fuzz-smoke USE_ISAL=0 RUN_SECS=30
+```

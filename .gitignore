@@ -8,3 +8,6 @@ corpus/local/
 bench/results/
 
 third_party/isa-l/bin/
+
+crash-*
+leak-*

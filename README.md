@@ -42,6 +42,9 @@ Unsupported switch forms are rejected with usage exit code `2`.
 
 ```sh
 make test
+make test-asan-ubsan
+make fuzz-build USE_ISAL=0
+make fuzz-smoke USE_ISAL=0 RUN_SECS=30
 make bench-store
 make bench-compressed
 make bench-solid
@@ -57,6 +60,8 @@ current `raze` decode path:
 - Override example: `UNRAR_THREADS=8 make bench-compressed`
 - Override example: `RUNS=11 make bench-solid`
 - Compressed and solid benches perform one warmup run and report `p50`/`p90`.
+- Fuzz smoke runs use temporary corpus copies, so repository seed corpora stay
+  unchanged.
 
 ## Corpus Workflow
 

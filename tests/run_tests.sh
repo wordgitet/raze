@@ -2,6 +2,9 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+CC_BIN="${CC:-cc}"
+EXTRA_CFLAGS="${EXTRA_CFLAGS:-}"
+EXTRA_LDFLAGS="${EXTRA_LDFLAGS:-}"
 ARCHIVE_STORE="$ROOT_DIR/corpus/local/archives/local_store.rar"
 ARCHIVE_FAST="$ROOT_DIR/corpus/local/archives/local_fast.rar"
 ARCHIVE_SOLID="$ROOT_DIR/corpus/local/archives/local_best_solid.rar"
@@ -72,17 +75,10 @@ TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
 
 log "running parser unit tests"
-PARSER_UNIT_BIN="$TMP_DIR/parser_units"
-cc -std=c11 -O2 -Wall -Wextra -Wpedantic \
-    -I"$ROOT_DIR/include" \
-    "$ROOT_DIR/tests/test_parser_units.c" \
-    "$ROOT_DIR/src/format/rar5/vint.c" \
-    "$ROOT_DIR/src/format/rar5/block_reader.c" \
-    "$ROOT_DIR/src/format/rar5/file_header.c" \
-    "$ROOT_DIR/src/checksum/crc32.c" \
-    "$ROOT_DIR/src/io/fs_meta.c" \
-    -o "$PARSER_UNIT_BIN"
-"$PARSER_UNIT_BIN"
+CC="$CC_BIN" \
+EXTRA_CFLAGS="$EXTRA_CFLAGS" \
+EXTRA_LDFLAGS="$EXTRA_LDFLAGS" \
+"$ROOT_DIR/tests/test_parser_units.sh"
 
 OUT_DIR="$TMP_DIR/out_store"
 log "extracting store archive and checking file contents"
@@ -353,6 +349,24 @@ for part in "${BLAKE_SPLIT_ENC_PARTS[@]}"; do
 done
 printf '\x03' | dd of="$TMP_DIR/blake_split_enc_htb_corrupt.part1.rar" bs=1 seek=32768 conv=notrunc status=none
 run_expect_exit 6 "$ROOT_DIR/raze" x -idq -o+ -psecret -op"$TMP_DIR/out_blake_split_enc_corrupt" "$TMP_DIR/blake_split_enc_htb_corrupt.part1.rar"
+
+log "checking split + encrypted BLAKE missing-volume failure path"
+BLAKE_SPLIT_ENC_MISSING_FIRST="$TMP_DIR/blake_split_enc_htb_missing.part1.rar"
+for part in "${BLAKE_SPLIT_ENC_PARTS[@]}"; do
+    part_base="$(basename "$part")"
+    part_suffix="${part_base#blake_split_enc_htb.}"
+    cp "$part" "$TMP_DIR/blake_split_enc_htb_missing.${part_suffix}"
+done
+rm -f "$TMP_DIR/blake_split_enc_htb_missing.part2.rar"
+run_expect_exit 8 "$ROOT_DIR/raze" x -idq -o+ -psecret -op"$TMP_DIR/out_blake_split_enc_missing" "$BLAKE_SPLIT_ENC_MISSING_FIRST"
+
+log "checking truncated encrypted-header archive detection"
+HENC_SIZE="$(stat -c%s "$HENC_ARCHIVE")"
+if [[ "$HENC_SIZE" -le 256 ]]; then
+    fail "encrypted header archive unexpectedly small for truncation test"
+fi
+dd if="$HENC_ARCHIVE" of="$TMP_DIR/encrypted_headers_truncated.rar" bs=1 count=$((HENC_SIZE / 2)) status=none
+run_expect_exit_one_of 4 6 "$ROOT_DIR/raze" x -idq -o+ -psecret -op"$TMP_DIR/out_henc_truncated" "$TMP_DIR/encrypted_headers_truncated.rar"
 
 log "checking long archive path support (>1024 bytes)"
 LONG_SRC_DIR="$TMP_DIR/long_src"

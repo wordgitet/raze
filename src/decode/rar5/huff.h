@@ -38,12 +38,21 @@ static inline int raze_rar5_br_fast_add_bits(
 	if (reader == 0) {
 		return 0;
 	}
+	if (reader->bit_pos > 7U || reader->byte_pos > reader->data_size) {
+		return 0;
+	}
 
 	advance_bytes = (size_t)(bits >> 3U);
 	advance_bits = bits & 7U;
+	if (advance_bytes > reader->data_size - reader->byte_pos) {
+		return 0;
+	}
 	next_byte_pos = reader->byte_pos + advance_bytes;
 	next_bit_pos = reader->bit_pos + advance_bits;
 	if (next_bit_pos >= 8U) {
+		if (next_byte_pos == reader->data_size) {
+			return 0;
+		}
 		next_byte_pos += 1U;
 		next_bit_pos -= 8U;
 	}
@@ -67,7 +76,9 @@ static inline uint16_t raze_rar5_br_fast_peek16(const RazeRar5BitReader *reader)
 	if (reader == 0) {
 		return 0;
 	}
-	if (__builtin_expect(reader->byte_pos + 2U >= reader->data_size, 0)) {
+	if (__builtin_expect(reader->bit_pos > 7U ||
+		reader->byte_pos >= reader->data_size ||
+		reader->data_size - reader->byte_pos < 3U, 0)) {
 		return raze_rar5_br_peek16(reader);
 	}
 

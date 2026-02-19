@@ -97,21 +97,21 @@ Build a fast, modular RAR5 decompressor in C with measurable performance wins an
 - Bench outputs are consistent and actionable across store/compressed/solid/split/encrypted.
 - Encrypted benchmark reaches target parity (<=10% gap) on this machine.
 
-## Phase 6: Hardening
+## Phase 6: Hardening - DONE
 
 ### Deliverables
 
-- Unit + integration tests integrated in CI.
-- Fuzzing targets for parser and decode entrypoints.
-- Sanitizer builds (ASan/UBSan) and regression checks.
+- Unit + integration tests integrated in CI. - DONE
+- Fuzzing targets for parser and decode entrypoints. - DONE
+- Sanitizer builds (ASan/UBSan) and regression checks. - DONE
 
 ### Exit Criteria
 
-- Fuzz/sanitizer runs are clean for agreed budgets.
-- Release candidate passes full regression suite.
+- Fuzz/sanitizer runs are clean for agreed budgets. - DONE
+- Release candidate passes full regression suite. - DONE
 
 ## Immediate Next Steps
 
-1. Add focused corruption/fuzz cases for encrypted split boundaries and hash extras.
+1. Expand corpus-driven fuzz seeds around encrypted split boundaries and hash extras.
 2. Continue hot-path tuning in decode/filter/write loops while keeping `make test` green.
-3. Start Phase 6 hardening work (CI, sanitizers, and fuzz harnesses).
+3. Add longer fuzz budget jobs (nightly) and track historical crash triage.
