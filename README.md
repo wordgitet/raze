@@ -43,6 +43,32 @@ cmake --preset linux-release
 cmake --build --preset linux-release
 ```
 
+## Submodule Bootstrap
+
+ISA-L is tracked as a submodule at `third_party/isa-l`.
+
+Fresh clone workflow:
+
+```sh
+git clone git@codeberg.org:wordgitet/raze.git
+cd raze
+make deps
+make
+```
+
+If you do not want ISA-L (or cannot fetch submodules), build with:
+
+```sh
+make USE_ISAL=0
+```
+
+If switching between `USE_ISAL=1` and `USE_ISAL=0` in the same tree, run a
+clean rebuild:
+
+```sh
+make clean
+```
+
 ## Run
 
 ```sh
@@ -97,6 +123,9 @@ current `raze` decode path:
 - Compressed and solid benches perform one warmup run and report `p50`/`p90`.
 - Fuzz smoke runs use temporary corpus copies, so repository seed corpora stay
   unchanged.
+- On Windows/MSYS test runs, archive `mtime` restoration can be environment-
+  dependent; metadata `mtime` assertions are logged as informational notes
+  rather than hard failures.
 
 ## CI Policy
 
