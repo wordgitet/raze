@@ -104,7 +104,8 @@ and strong correctness guarantees.
       failure path).
 - [x] Add long-running local fuzz soak target + triage process
       (`make fuzz-soak`, `tests/fuzz/TRIAGE.md`).
-- [ ] Add reproducible benchmark baselines for target hardware classes.
+- [x] Add reproducible benchmark baselines for target hardware classes
+      (`docs/perf/baseline.md` + raw logs in `docs/perf/`).
 
 ### Performance
 
@@ -171,5 +172,5 @@ and strong correctness guarantees.
 
 1. Validate new `x/e/l/lt/t/p` command surface on macOS once hardware/runner
    is available; keep Windows regression coverage in MSYS2.
-2. Add reproducible benchmark baselines for target hardware classes.
-3. Expand corpus coverage with additional real-world/adversarial fixtures.
+2. Expand corpus coverage with additional real-world/adversarial fixtures.
+3. Add long-running fuzz execution cadence and bug triage tracking routine.

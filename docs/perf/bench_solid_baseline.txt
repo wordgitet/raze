@@ -1,0 +1,12 @@
+cc build/src/checksum/blake2sp.o build/src/checksum/crc32.o build/src/cli/cli_args.o build/src/cli/main.o build/src/cli/match.o build/src/cli/overwrite_prompt.o build/src/crypto/crypto_stub.o build/src/crypto/rar5_crypt.o build/src/crypto/rar5_kdf.o build/src/decode/decoder.o build/src/decode/extract_compressed.o build/src/decode/extract_store.o build/src/decode/list_archive.o build/src/decode/print_archive.o build/src/decode/rar5/bit_reader.o build/src/decode/rar5/filter.o build/src/decode/rar5/huff.o build/src/decode/rar5/unpack_v50.o build/src/decode/rar5/window.o build/src/decode/test_archive.o build/src/format/rar5/block_reader.o build/src/format/rar5/file_header.o build/src/format/rar5/parser.o build/src/format/rar5/vint.o build/src/io/file_reader.o build/src/io/fs_meta.o build/src/io/path_guard.o build/src/io/path_transform.o build/src/io/volume_chain.o build/src/platform/posix_fs.o build/src/platform/posix_path.o build/src/platform/posix_time.o build/src/platform/posix_tty.o build/src/platform/win_fs.o build/src/platform/win_path.o build/src/platform/win_time.o build/src/platform/win_tty.o -o raze -flto  -lssl -lcrypto  third_party/isa-l/bin/isa-l.a
+./bench/bench_solid.sh
+[bench-solid] warmup for local_best_solid.rar [raze]
+[bench-solid] warmup for local_best_solid.rar [unrar]
+[bench-solid] running 7 runs for local_best_solid.rar [raze]
+[bench-solid] running 7 runs for local_best_solid.rar [unrar]
+[bench-solid] local_best_solid.rar: raze p50=0.076385s p90=0.078881s (233.07 MiB/s), unrar p50=0.093467s p90=0.094624s (190.48 MiB/s), gap=-18.28%
+[bench-solid] warmup for thematic_best_solid.rar [raze]
+[bench-solid] warmup for thematic_best_solid.rar [unrar]
+[bench-solid] running 7 runs for thematic_best_solid.rar [raze]
+[bench-solid] running 7 runs for thematic_best_solid.rar [unrar]
+[bench-solid] thematic_best_solid.rar: raze p50=0.166296s p90=0.171220s (333.80 MiB/s), unrar p50=0.177822s p90=0.178865s (312.16 MiB/s), gap=-6.48%

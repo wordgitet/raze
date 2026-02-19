@@ -1,0 +1,13 @@
+cc build/src/checksum/blake2sp.o build/src/checksum/crc32.o build/src/cli/cli_args.o build/src/cli/main.o build/src/cli/match.o build/src/cli/overwrite_prompt.o build/src/crypto/crypto_stub.o build/src/crypto/rar5_crypt.o build/src/crypto/rar5_kdf.o build/src/decode/decoder.o build/src/decode/extract_compressed.o build/src/decode/extract_store.o build/src/decode/list_archive.o build/src/decode/print_archive.o build/src/decode/rar5/bit_reader.o build/src/decode/rar5/filter.o build/src/decode/rar5/huff.o build/src/decode/rar5/unpack_v50.o build/src/decode/rar5/window.o build/src/decode/test_archive.o build/src/format/rar5/block_reader.o build/src/format/rar5/file_header.o build/src/format/rar5/parser.o build/src/format/rar5/vint.o build/src/io/file_reader.o build/src/io/fs_meta.o build/src/io/path_guard.o build/src/io/path_transform.o build/src/io/volume_chain.o build/src/platform/posix_fs.o build/src/platform/posix_path.o build/src/platform/posix_time.o build/src/platform/posix_tty.o build/src/platform/win_fs.o build/src/platform/win_path.o build/src/platform/win_time.o build/src/platform/win_tty.o -o raze -flto  -lssl -lcrypto  third_party/isa-l/bin/isa-l.a
+./bench/bench_encrypted.sh
+[bench-encrypted] warmup [data-encrypted] raze
+[bench-encrypted] warmup [data-encrypted] unrar
+[bench-encrypted] running 7 runs [data-encrypted] raze
+[bench-encrypted] running 7 runs [data-encrypted] unrar
+[bench-encrypted] data-encrypted: raze p50=0.026946s p90=0.028135s (93.76 MiB/s), unrar p50=0.032938s p90=0.040524s (76.70 MiB/s), gap=-18.19%
+[bench-encrypted] warmup [header-encrypted] raze
+[bench-encrypted] warmup [header-encrypted] unrar
+[bench-encrypted] running 7 runs [header-encrypted] raze
+[bench-encrypted] running 7 runs [header-encrypted] unrar
+[bench-encrypted] header-encrypted: raze p50=0.026625s p90=0.027290s (94.89 MiB/s), unrar p50=0.057334s p90=0.058142s (44.07 MiB/s), gap=-53.56%
+[bench-encrypted] performance gates passed (<=10% slower than unrar)
