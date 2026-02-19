@@ -18,6 +18,7 @@ Fast modular RAR5 decompressor project (work in progress).
 - `src/cli/`: Command-line interface.
 - `tests/`: Unit/integration tests.
 - `bench/`: Microbenchmarks and corpus benchmarks.
+- `docs/`: Technical references, compatibility notes, and ADRs.
 
 ## Build
 
@@ -110,6 +111,11 @@ make corpus
 ```
 
 Scripts detect already downloaded/generated artifacts and skip unnecessary work.
+
+## Documentation
+
+- Documentation format and layout rules live in `docs/README.md`.
+- New major decisions should be recorded as ADRs in `docs/adr/`.
 
 ## Metadata Behavior (Current)
 
