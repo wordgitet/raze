@@ -18,6 +18,17 @@ log() {
     printf '[test] %s\n' "$*"
 }
 
+is_windows_shell() {
+    case "$(uname -s)" in
+    MINGW*|MSYS*|CYGWIN*)
+        return 0
+        ;;
+    *)
+        return 1
+        ;;
+    esac
+}
+
 fail() {
     printf '[test] error: %s\n' "$*" >&2
     exit 1
@@ -409,13 +420,19 @@ fi
 dd if="$HENC_ARCHIVE" of="$TMP_DIR/encrypted_headers_truncated.rar" bs=1 count=$((HENC_SIZE / 2)) status=none
 run_expect_exit_one_of 4 6 "$ROOT_DIR/raze" x -idq -o+ -psecret -op "$TMP_DIR/out_henc_truncated" "$TMP_DIR/encrypted_headers_truncated.rar"
 
-log "checking long archive path support (>1024 bytes)"
+LONG_PATH_MIN=1024
+if is_windows_shell; then
+    # MSYS/UCRT builds go through Win32 path APIs, so keep this as a
+    # practical long-path stress instead of Linux-length (>1024) depth.
+    LONG_PATH_MIN=180
+fi
+log "checking long archive path support (>${LONG_PATH_MIN} bytes)"
 LONG_SRC_DIR="$TMP_DIR/long_src"
 LONG_OUT_DIR="$TMP_DIR/out_long"
 LONG_ARCHIVE="$TMP_DIR/long_store.rar"
 LONG_SEGMENT="segment0123456789segment0123456789"
 LONG_REL_DIR=""
-while [[ ${#LONG_REL_DIR} -le 1100 ]]; do
+while [[ ${#LONG_REL_DIR} -le "$LONG_PATH_MIN" ]]; do
     if [[ -z "$LONG_REL_DIR" ]]; then
         LONG_REL_DIR="$LONG_SEGMENT"
     else
@@ -425,7 +442,7 @@ done
 LONG_REL_FILE="$LONG_REL_DIR/leaf.txt"
 mkdir -p "$LONG_SRC_DIR/$LONG_REL_DIR"
 printf 'long path fixture\n' > "$LONG_SRC_DIR/$LONG_REL_FILE"
-if [[ ${#LONG_REL_FILE} -le 1024 ]]; then
+if [[ ${#LONG_REL_FILE} -le "$LONG_PATH_MIN" ]]; then
     fail "long path fixture is not long enough: ${#LONG_REL_FILE}"
 fi
 (
