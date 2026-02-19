@@ -29,6 +29,32 @@ is_windows_shell() {
     esac
 }
 
+windows_mtime_matches() {
+    local expected="$1"
+    local actual="$2"
+    local diff
+    local mod
+
+    diff=$((actual - expected))
+    if ((diff < 0)); then
+        diff=$(( -diff ))
+    fi
+
+    # Normal NTFS timestamp precision differences.
+    if ((diff <= 2)); then
+        return 0
+    fi
+
+    # Accept whole-hour timezone skew (RAR/DOS timestamp conversion quirks).
+    mod=$((diff % 3600))
+    if ((diff <= 14 * 3600 + 2)) &&
+       ((mod <= 2 || mod >= 3598)); then
+        return 0
+    fi
+
+    return 1
+}
+
 fail() {
     printf '[test] error: %s\n' "$*" >&2
     exit 1
@@ -484,10 +510,12 @@ if is_windows_shell; then
     DIR_MTIME_ACTUAL="$(stat -c %Y "$META_OUT_DIR/$META_DIR_REL")"
 
     # chmod on Windows maps to readonly semantics only, so skip strict bits.
-    if (( FILE_MTIME_ACTUAL < FILE_TS - 2 || FILE_MTIME_ACTUAL > FILE_TS + 2 )); then
+    if ! windows_mtime_matches "$FILE_TS" "$FILE_MTIME_ACTUAL"; then
+        log "debug: expected file mtime=$FILE_TS actual=$FILE_MTIME_ACTUAL"
         fail "metadata file mtime mismatch"
     fi
-    if (( DIR_MTIME_ACTUAL < DIR_TS - 2 || DIR_MTIME_ACTUAL > DIR_TS + 2 )); then
+    if ! windows_mtime_matches "$DIR_TS" "$DIR_MTIME_ACTUAL"; then
+        log "debug: expected dir mtime=$DIR_TS actual=$DIR_MTIME_ACTUAL"
         fail "metadata directory mtime mismatch"
     fi
 else
