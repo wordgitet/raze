@@ -79,6 +79,7 @@ static inline uint16_t raze_rar5_br_fast_peek16(const RazeRar5BitReader *reader)
 	if (__builtin_expect(reader->bit_pos > 7U ||
 		reader->byte_pos >= reader->data_size ||
 		reader->data_size - reader->byte_pos < 3U, 0)) {
+		/* Fall back to the checked slow path near buffer tail. */
 		return raze_rar5_br_peek16(reader);
 	}
 

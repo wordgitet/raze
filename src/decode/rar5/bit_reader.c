@@ -27,6 +27,7 @@ static uint64_t load_be64_partial(const unsigned char *ptr, size_t avail)
 	}
 
 	if (count < 8U) {
+		/* Left-align tail bytes so callers can extract high bits directly. */
 		value <<= (8U - count) * 8U;
 	}
 
@@ -72,6 +73,7 @@ int raze_rar5_br_add_bits(RazeRar5BitReader *reader, unsigned int bits) {
 	advance_bytes = (size_t)(bits >> 3U);
 	advance_bits = bits & 7U;
 
+	/* Reject wrapped/overshot byte advances before updating cursor. */
 	if (advance_bytes > reader->data_size - reader->byte_pos) {
 		return 0;
 	}
@@ -143,6 +145,7 @@ uint16_t raze_rar5_br_peek16(const RazeRar5BitReader *reader) {
 
 	p = reader->data + reader->byte_pos;
 	bit_field = 0;
+	/* Tail-safe peek: short reads are zero-padded instead of out-of-bounds. */
 	if (avail >= 1U) {
 		bit_field |= (uint32_t)p[0] << 16U;
 	}

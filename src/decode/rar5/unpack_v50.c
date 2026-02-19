@@ -147,6 +147,7 @@ static int read_block_header(RazeRar5BitReader *reader, RazeRar5BlockHeader *hea
 
 	byte_count = ((block_flags >> 3U) & 3U) + 1U;
 	if (byte_count == 4U) {
+		/* 4-byte block-size encoding is reserved in RAR5 block flags. */
 		return 0;
 	}
 
@@ -207,6 +208,7 @@ static int read_tables(
 	uint32_t i;
 
 	if (!header->table_present) {
+		/* Table-less blocks are valid only after a previous table load. */
 		return ctx->tables_ready;
 	}
 
@@ -472,6 +474,10 @@ static int copy_match_to_output(
 	history_filled = ctx->dict_filled;
 
 	if (distance == 0U || distance > history_filled + out) {
+		/*
+		 * Keep behavior deterministic on invalid distances: emit zeros
+		 * instead of reading out-of-window state.
+		 */
 		memset(output + out, 0, length);
 		*out_pos = out + length;
 		return 1;
@@ -621,8 +627,10 @@ RazeStatus raze_rar5_unpack_ctx_decode_file(
 	if (!solid) {
 		raze_rar5_unpack_ctx_reset_for_new_stream(ctx);
 	} else if (!ctx->solid_initialized) {
+		/* First file in a solid stream starts from a clean state. */
 		raze_rar5_unpack_ctx_reset_for_new_stream(ctx);
 	} else {
+		/* Solid reuse requires compatible decode model and dictionary. */
 		if (ctx->extra_dist != extra_dist) {
 			raze_rar5_unpack_ctx_reset_for_new_stream(ctx);
 			return RAZE_STATUS_BAD_ARCHIVE;
@@ -672,6 +680,7 @@ RazeStatus raze_rar5_unpack_ctx_decode_file(
 				file_done = 1;
 				break;
 			}
+			/* Crossing block boundary may also switch Huffman tables. */
 			if (!read_block_header(&reader, &block)) {
 				status = RAZE_STATUS_BAD_ARCHIVE;
 				goto done;
@@ -851,6 +860,7 @@ RazeStatus raze_rar5_unpack_ctx_decode_file(
 				continue;
 			}
 
+			/* Any remaining slot value is malformed in this stream state. */
 			status = RAZE_STATUS_BAD_ARCHIVE;
 			goto done;
 		}

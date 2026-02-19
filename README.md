@@ -2,6 +2,11 @@
 
 Fast modular RAR5 decompressor project (work in progress).
 
+## Status and Platform
+
+- Project maturity: **alpha** (interfaces and behavior can still change).
+- Platform support: **Linux only** for now.
+
 ## Layout
 
 - `include/raze/`: Public API headers.
@@ -101,6 +106,19 @@ Scripts detect already downloaded/generated artifacts and skip unnecessary work.
 - Wrong password returns checksum-class failure (`exit 6`).
 - Missing password in non-TTY mode fails deterministically (`exit 2`).
 
+## Decoder Invariants
+
+- In `unpack_v50`, block boundaries are strict: decoding continues only while
+  bit reader position is inside current block framing.
+- Table-less blocks are accepted only after at least one valid Huffman table
+  load in the same stream.
+- In solid mode, decoder state is reused only when dictionary model is
+  compatible; otherwise extraction fails with bad-archive.
+- Invalid back-reference distance is handled deterministically (zero fill),
+  never with out-of-window memory access.
+- Any malformed slot/table/bitstream transition fails with
+  `RAZE_STATUS_BAD_ARCHIVE`.
+
 ## Diagnostics
 
 - Fatal CLI errors print status plus context when available:
@@ -117,3 +135,11 @@ Scripts detect already downloaded/generated artifacts and skip unnecessary work.
 For backward-compatible command/switch behavior, keep this reference in sync:
 
 - `docs/unrar_compat_help.txt`
+
+## License
+
+- Project code in this tree is licensed under `0BSD`. See `LICENSE`.
+- Third-party component licensing is documented in
+  `THIRD_PARTY_NOTICES.md`.
+- Legal/provenance notes for external references are documented in
+  `LEGAL.md`.
