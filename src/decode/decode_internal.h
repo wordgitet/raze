@@ -85,7 +85,20 @@ RazeStatus raze_extract_store_archive(
     const char *output_dir,
     const RazeExtractOptions *options
 );
+RazeStatus raze_test_archive(
+	const char *archive_path,
+	const RazeExtractOptions *options
+);
+RazeStatus raze_print_archive(
+	const char *archive_path,
+	const RazeExtractOptions *options
+);
 RazeStatus raze_list_rar5_archive(const char *archive_path, int technical);
+RazeStatus raze_list_rar5_archive_with_options(
+	const char *archive_path,
+	int technical,
+	const RazeExtractOptions *options
+);
 void raze_diag_set(const char *fmt, ...);
 
 #endif

@@ -5,7 +5,10 @@ Fast modular RAR5 decompressor project (work in progress).
 ## Status and Platform
 
 - Project maturity: **alpha** (interfaces and behavior can still change).
-- Platform support: **Linux only** for now.
+- Platform status:
+  - Linux: supported baseline.
+  - macOS/Windows: beta-prep bring-up target (CMake path available).
+  - *BSD/QNX: experimental.
 
 ## Layout
 
@@ -33,20 +36,37 @@ Build defaults use performance-oriented optimization flags (`-O3`,
 make ENABLE_LTO=0
 ```
 
+Cross-platform beta-prep build path:
+
+```sh
+cmake --preset linux-release
+cmake --build --preset linux-release
+```
+
 ## Run
 
 ```sh
 ./raze --help
 ./raze l corpus/local/archives/local_store.rar
 ./raze x -opout corpus/local/archives/local_store.rar
+./raze e -opout_flat corpus/local/archives/local_store.rar
+./raze t corpus/local/archives/local_store.rar
+./raze p -nsmall_text.txt corpus/local/archives/local_store.rar
 ```
 
-V1 extract-compatible switches (UnRAR-style subset):
+Beta-prep switch subset (deterministic parser):
 
 - `-op<path>` or `-op <path>`
 - `-o+`, `-o-`, `-y`
+- `-ep`
+- `-ad1`, `-ad2`
+- `-r`
+- `-n<mask>`, `-x<mask>`
+- `-n@<list>`, `-x@<list>`
+- `-ap<path>`
 - `-p[password]` (`-p` prompts on TTY)
-- `-idq`, `-inul`
+- `-cfg-`
+- `-idq`, `-idp`, `-idn`, `-inul`, `-ierr`
 - `-` (stop switch parsing)
 
 Unsupported switch forms are rejected with usage exit code `2`.
@@ -116,6 +136,11 @@ Scripts detect already downloaded/generated artifacts and skip unnecessary work.
 
 - Documentation format and layout rules live in `docs/README.md`.
 - New major decisions should be recorded as ADRs in `docs/adr/`.
+- Compatibility and beta-prep status docs:
+  - `docs/compat_matrix.md`
+  - `docs/beta_contract.md`
+  - `docs/platform_matrix.md`
+  - `docs/beta_readiness_report.md`
 
 ## Metadata Behavior (Current)
 

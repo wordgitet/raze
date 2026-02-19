@@ -28,6 +28,10 @@ This directory is now the source of truth for project documentation.
 
 - `docs/rarlab_technote.md`: RAR technical reference used by decoder work.
 - `docs/unrar_compat_help.txt`: UnRAR help reference for CLI compatibility.
+- `docs/compat_matrix.md`: command/switch compatibility snapshot.
+- `docs/beta_contract.md`: deterministic behavior contract for beta-prep.
+- `docs/platform_matrix.md`: supported vs experimental platform tiers.
+- `docs/beta_readiness_report.md`: milestone status and remaining blockers.
 - `docs/adr/`: architecture decision records (new).
 
 ## ADR Rules

@@ -13,6 +13,7 @@
 
 #include "../checksum/blake2sp.h"
 #include "../checksum/crc32.h"
+#include "../cli/match.h"
 #include "../cli/overwrite_prompt.h"
 #include "../crypto/rar5_crypt.h"
 #include "../crypto/rar5_kdf.h"
@@ -21,6 +22,7 @@
 #include "../format/rar5/vint.h"
 #include "../io/fs_meta.h"
 #include "../io/path_guard.h"
+#include "../io/path_transform.h"
 #include "../io/volume_chain.h"
 #include "decode_internal.h"
 #include "extract_compressed.h"
@@ -981,6 +983,30 @@ static void apply_pending_dir_metadata(const PendingDirMetaList *list, int quiet
     }
 }
 
+static int entry_selected(
+	const RazeRar5FileHeader *fh,
+	const RazeExtractOptions *options
+)
+{
+	RazeMatchRules rules;
+
+	if (fh == 0 || fh->name == 0) {
+		return 0;
+	}
+	if (options == 0) {
+		return 1;
+	}
+
+	memset(&rules, 0, sizeof(rules));
+	rules.ap_prefix = options->ap_prefix;
+	rules.recurse = options->recurse;
+	rules.includes = options->include_masks;
+	rules.include_count = options->include_mask_count;
+	rules.excludes = options->exclude_masks;
+	rules.exclude_count = options->exclude_mask_count;
+	return raze_match_entry_path(fh->name, &rules);
+}
+
 static RazeStatus ensure_supported_file(const RazeRar5FileHeader *fh, int allow_split) {
     if (fh == 0) {
         return RAZE_STATUS_BAD_ARGUMENT;
@@ -1158,22 +1184,70 @@ static RazeStatus extract_file_entry(
 ) {
     struct stat st;
     char out_path[4096];
+    char entry_rel[4096];
     FILE *output = 0;
     RazeStatus status;
     int remove_output = 0;
     int solid_stream;
+    int test_only;
+    int print_stdout;
+    int strip_paths;
 
     if (payload_stream == 0 || fh == 0 || output_dir == 0 || pending_dirs == 0 || scratch == 0) {
         raze_diag_set("internal bad arguments while extracting entry");
         return RAZE_STATUS_BAD_ARGUMENT;
     }
 
+    test_only = options != 0 ? options->test_only : 0;
+    print_stdout = options != 0 ? options->print_stdout : 0;
+    strip_paths = options != 0 ? options->strip_paths : 0;
+
     solid_stream = (archive_is_solid || fh->solid) && !fh->is_dir;
     if (!solid_stream) {
         raze_compressed_scratch_reset_solid_stream(scratch);
     }
 
-    status = raze_path_guard_join(output_dir, fh->name, fh->host_os, out_path, sizeof(out_path));
+    if (test_only || print_stdout) {
+        if (fh->is_dir) {
+            if (!skip_forward(payload_stream, payload_size)) {
+                raze_diag_set("cannot skip payload for directory entry '%s'",
+                              fh->name);
+                return RAZE_STATUS_BAD_ARCHIVE;
+            }
+            return RAZE_STATUS_OK;
+        }
+        status = decode_payload(
+            payload_stream,
+            print_stdout ? stdout : 0,
+            fh,
+            scratch,
+            solid_stream,
+            options != 0 ? options->password : 0,
+            options != 0 ? options->password_present : 0
+        );
+        if (status != RAZE_STATUS_OK && diag_is_empty()) {
+            raze_diag_set("failed to verify entry '%s'", fh->name);
+        }
+        return status;
+    }
+
+    if (strip_paths && fh->is_dir) {
+        if (!skip_forward(payload_stream, payload_size)) {
+            raze_diag_set("cannot skip payload for directory entry '%s'",
+                          fh->name);
+            return RAZE_STATUS_BAD_ARCHIVE;
+        }
+        return RAZE_STATUS_OK;
+    }
+
+    if (!raze_path_transform_entry(fh->name, strip_paths, entry_rel,
+                                   sizeof(entry_rel))) {
+        raze_diag_set("cannot transform output name for entry '%s'", fh->name);
+        return RAZE_STATUS_BAD_ARGUMENT;
+    }
+
+    status = raze_path_guard_join(output_dir, entry_rel, fh->host_os, out_path,
+                                  sizeof(out_path));
     if (status != RAZE_STATUS_OK) {
         raze_diag_set("unsafe or invalid output path for entry '%s'", fh->name);
         return status;
@@ -1341,17 +1415,37 @@ static RazeStatus handle_file_block(
 
     status = ensure_supported_file(&fh, 0);
     if (status == RAZE_STATUS_OK) {
-        status = extract_file_entry(
-            archive,
-            block->data_size,
-            &fh,
-            output_dir,
-            options,
-            archive_is_solid,
-            prompt,
-            pending_dirs,
-            scratch
-        );
+	if (!entry_selected(&fh, options)) {
+		int solid_stream = (archive_is_solid || fh.solid) && !fh.is_dir;
+
+		if (solid_stream) {
+			status = decode_payload(
+				archive,
+				0,
+				&fh,
+				scratch,
+				1,
+				options != 0 ? options->password : 0,
+				options != 0 ? options->password_present : 0
+			);
+		} else if (!skip_forward(archive, block->data_size)) {
+			status = RAZE_STATUS_BAD_ARCHIVE;
+		} else {
+			status = RAZE_STATUS_OK;
+		}
+	} else {
+		status = extract_file_entry(
+			archive,
+			block->data_size,
+			&fh,
+			output_dir,
+			options,
+			archive_is_solid,
+			prompt,
+			pending_dirs,
+			scratch
+		);
+	}
     }
 
     raze_rar5_file_header_free(&fh);
@@ -1399,17 +1493,37 @@ static RazeStatus extract_pending_split_file(
     }
 
     pending->header.pack_size = pending->packed_size;
-    status = extract_file_entry(
-        payload_stream,
-        pending->packed_size,
-        &pending->header,
-        output_dir,
-        options,
-        archive_is_solid,
-        prompt,
-        pending_dirs,
-        scratch
-    );
+    if (!entry_selected(&pending->header, options)) {
+	int solid_stream;
+
+	solid_stream = (archive_is_solid || pending->header.solid) &&
+		      !pending->header.is_dir;
+	if (solid_stream) {
+		status = decode_payload(
+			payload_stream,
+			0,
+			&pending->header,
+			scratch,
+			1,
+			options != 0 ? options->password : 0,
+			options != 0 ? options->password_present : 0
+		);
+	} else {
+		status = RAZE_STATUS_OK;
+	}
+    } else {
+	status = extract_file_entry(
+		payload_stream,
+		pending->packed_size,
+		&pending->header,
+		output_dir,
+		options,
+		archive_is_solid,
+		prompt,
+		pending_dirs,
+		scratch
+	);
+    }
     fclose(payload_stream);
     return status;
 }
@@ -1552,6 +1666,7 @@ RazeStatus raze_extract_store_archive(
     int saw_end = 0;
     RazeStatus status;
     RazeRar5ReadResult rr;
+    char output_root[4096];
 
     memset(&pending_dirs, 0, sizeof(pending_dirs));
     memset(&pending_split, 0, sizeof(pending_split));
@@ -1570,9 +1685,17 @@ RazeStatus raze_extract_store_archive(
         options = &local_options;
     }
 
-    status = raze_path_guard_make_dirs(output_dir);
+    if (!raze_path_transform_build_root(output_dir, archive_path,
+                                        options->ad_mode, output_root,
+                                        sizeof(output_root))) {
+        raze_diag_set("cannot build output root path");
+        status = RAZE_STATUS_BAD_ARGUMENT;
+        goto cleanup;
+    }
+
+    status = raze_path_guard_make_dirs(output_root);
     if (status != RAZE_STATUS_OK) {
-        raze_diag_set("cannot create output root '%s'", output_dir);
+        raze_diag_set("cannot create output root '%s'", output_root);
         goto cleanup;
     }
 
@@ -1688,7 +1811,7 @@ RazeStatus raze_extract_store_archive(
                             buf,
                             buf_len,
                             &pending_split,
-                            output_dir,
+                            output_root,
                             options,
                             archive_is_solid,
                             &prompt,
@@ -1701,7 +1824,7 @@ RazeStatus raze_extract_store_archive(
                             &block,
                             buf,
                             buf_len,
-                            output_dir,
+                            output_root,
                             options,
                             archive_is_solid,
                             &prompt,

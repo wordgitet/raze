@@ -49,6 +49,16 @@ RazeExtractOptions raze_extract_options_default(void)
 	options.verbose = 0;
 	options.password = 0;
 	options.password_present = 0;
+	options.strip_paths = 0;
+	options.ad_mode = 0;
+	options.recurse = 0;
+	options.ap_prefix = 0;
+	options.include_masks = 0;
+	options.include_mask_count = 0U;
+	options.exclude_masks = 0;
+	options.exclude_mask_count = 0U;
+	options.test_only = 0;
+	options.print_stdout = 0;
 	return options;
 }
 
@@ -161,7 +171,19 @@ RazeStatus raze_list_archive(
 	int technical
 )
 {
+	return raze_list_archive_with_options(decoder, archive_path, technical,
+					      0);
+}
+
+RazeStatus raze_list_archive_with_options(
+	RazeDecoder *decoder,
+	const char *archive_path,
+	int technical,
+	const RazeExtractOptions *options
+)
+{
 	RazeStatus status;
+	RazeExtractOptions local_options;
 
 	raze_clear_error_detail();
 
@@ -180,7 +202,13 @@ RazeStatus raze_list_archive(
 		return RAZE_STATUS_IO;
 	}
 
-	status = raze_list_rar5_archive(archive_path, technical);
+	if (options == 0) {
+		local_options = raze_extract_options_default();
+		options = &local_options;
+	}
+
+	status = raze_list_rar5_archive_with_options(archive_path, technical,
+						     options);
 	if (status != RAZE_STATUS_OK && raze_diag_is_empty()) {
 		raze_diag_set("list failed for '%s'", archive_path);
 	}

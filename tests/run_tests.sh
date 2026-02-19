@@ -129,11 +129,39 @@ log "checking supported compatibility switches for extract"
 run_expect_exit 0 "$ROOT_DIR/raze" x -y -idq -op"$TMP_DIR/out_y" "$ARCHIVE_STORE"
 run_expect_exit 0 "$ROOT_DIR/raze" x -inul -o+ -op"$TMP_DIR/out_inul" "$ARCHIVE_STORE"
 run_expect_exit 0 "$ROOT_DIR/raze" x -idq -o+ -psecret -op"$TMP_DIR/out_p" "$ARCHIVE_STORE"
+run_expect_exit 0 "$ROOT_DIR/raze" x -idp -o+ -op"$TMP_DIR/out_idp" "$ARCHIVE_STORE"
+set +e
+"$ROOT_DIR/raze" l -idq "$ARCHIVE_STORE" > /dev/null
+rc=$?
+set -e
+if [[ "$rc" -ne 0 ]]; then
+    fail "list command with -idq failed with exit $rc"
+fi
 
 log "checking -o switch compatibility (bare -o must be rejected)"
 run_expect_exit 2 "$ROOT_DIR/raze" x -idq -o "$ARCHIVE_STORE"
-run_expect_exit 2 "$ROOT_DIR/raze" x -idp "$ARCHIVE_STORE"
-run_expect_exit 2 "$ROOT_DIR/raze" l -idq "$ARCHIVE_STORE"
+
+log "checking e command path-stripping behavior"
+run_expect_exit 0 "$ROOT_DIR/raze" e -idq -o+ -op"$TMP_DIR/out_e" "$ARCHIVE_STORE"
+if [[ ! -f "$TMP_DIR/out_e/file_1.txt" ]]; then
+    fail "e command did not flatten nested path file_1.txt"
+fi
+
+log "checking t command integrity-only path"
+run_expect_exit 0 "$ROOT_DIR/raze" t -idq "$ARCHIVE_STORE"
+
+log "checking p command print path"
+P_OUT="$TMP_DIR/print_small.txt"
+set +e
+"$ROOT_DIR/raze" p -idq -nsmall_text.txt "$ARCHIVE_STORE" > "$P_OUT"
+rc=$?
+set -e
+if [[ "$rc" -ne 0 ]]; then
+    fail "print command failed with exit $rc"
+fi
+if [[ ! -s "$P_OUT" ]]; then
+    fail "print command produced empty output"
+fi
 
 log "checking SFX-prefixed archive signature scan"
 dd if=/dev/zero of="$TMP_DIR/sfx_prefix.bin" bs=1 count=512 status=none

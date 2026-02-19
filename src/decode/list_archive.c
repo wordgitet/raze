@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "../cli/match.h"
 #include "../format/rar5/block_reader.h"
 #include "../format/rar5/file_header.h"
 #include "decode_internal.h"
@@ -131,17 +132,44 @@ static void print_entry(
     );
 }
 
-RazeStatus raze_list_rar5_archive(const char *archive_path, int technical) {
+RazeStatus raze_list_rar5_archive(const char *archive_path, int technical)
+{
+	RazeExtractOptions options;
+
+	options = raze_extract_options_default();
+	return raze_list_rar5_archive_with_options(archive_path, technical,
+						   &options);
+}
+
+RazeStatus raze_list_rar5_archive_with_options(
+	const char *archive_path,
+	int technical,
+	const RazeExtractOptions *options
+)
+{
     FILE *file;
     RazeStatus status;
     RazeRar5ReadResult rr;
     int saw_main = 0;
     int saw_end = 0;
+	RazeExtractOptions local_options;
+	RazeMatchRules rules;
 
 	if (archive_path == 0) {
 		raze_diag_set("archive path is required");
 		return RAZE_STATUS_BAD_ARGUMENT;
 	}
+	if (options == 0) {
+		local_options = raze_extract_options_default();
+		options = &local_options;
+	}
+	memset(&rules, 0, sizeof(rules));
+	rules.ap_prefix = options->ap_prefix;
+	rules.recurse = options->recurse;
+	rules.includes = options->include_masks;
+	rules.include_count = options->include_mask_count;
+	rules.excludes = options->exclude_masks;
+	rules.exclude_count = options->exclude_mask_count;
 
 	file = fopen(archive_path, "rb");
 	if (file == 0) {
@@ -206,7 +234,10 @@ RazeStatus raze_list_rar5_archive(const char *archive_path, int technical) {
 					fclose(file);
 					return status;
                 }
-                print_entry(&fh, technical, block.header_type == RAZE_RAR5_HEAD_SERVICE);
+		if (raze_match_entry_path(fh.name, &rules)) {
+			print_entry(&fh, technical,
+				    block.header_type == RAZE_RAR5_HEAD_SERVICE);
+		}
                 raze_rar5_file_header_free(&fh);
                 break;
             }

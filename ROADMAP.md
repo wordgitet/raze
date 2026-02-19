@@ -89,10 +89,10 @@ and strong correctness guarantees.
 
 ### Stability and Compatibility
 
-- [ ] Freeze and document supported CLI/switch surface for beta.
-- [ ] Maintain backward-compatible behavior for all beta-documented switches.
-- [ ] Keep deterministic exit-code mapping stable across releases.
-- [ ] Publish compatibility matrix (supported vs unsupported archive features).
+- [x] Freeze and document supported CLI/switch surface for beta-prep.
+- [x] Maintain backward-compatible behavior for beta-documented switches.
+- [x] Keep deterministic exit-code mapping stable across releases.
+- [x] Publish compatibility matrix (supported vs unsupported archive features).
 
 ### Quality and Validation
 
@@ -115,13 +115,13 @@ and strong correctness guarantees.
 
 ### Cross-Platform Bring-Up
 
-- [ ] Introduce a small portability layer for filesystem/path/time/tty behavior.
+- [x] Introduce a small portability layer for filesystem/path/time/tty behavior.
 - [ ] Remove Linux-only assumptions from CLI and I/O edge paths.
 - [ ] Bring up and validate macOS build + test flow.
 - [ ] Bring up and validate Windows build + test flow.
 - [ ] Add experimental validation path for `*BSD` (best-effort tier).
 - [ ] Add experimental validation path for QNX (best-effort tier).
-- [ ] Publish platform support tiers:
+- [x] Publish platform support tiers:
       Linux/macOS/Windows as target supported, `*BSD`/QNX as experimental.
 
 ### Beta Exit Criteria
@@ -162,8 +162,8 @@ and strong correctness guarantees.
 
 ## Current Focus (Near-Term)
 
-1. Expand corpus-driven fuzz seeds around encrypted split boundaries and hash
-   extras.
-2. Continue hot-path tuning in decode/filter/write loops while keeping
-   `make test` green.
-3. Add longer fuzz budget jobs and track historical crash triage.
+1. Validate new `x/e/l/lt/t/p` command surface on macOS and Windows build
+   environments.
+2. Expand parser/command tests for switch edge-cases (`-ap`, `-n@`, `-x@`,
+   `-ad1`, `-ad2`) and ensure deterministic errors.
+3. Continue corpus + fuzz hardening work around encrypted split boundaries.
