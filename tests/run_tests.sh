@@ -479,17 +479,30 @@ run_expect_exit 0 "$ROOT_DIR/raze" x -idq -o+ -op "$META_OUT_DIR" "$META_ARCHIVE
 if ! cmp -s "$META_SRC_DIR/$META_FILE_REL" "$META_OUT_DIR/$META_FILE_REL"; then
     fail "metadata fixture content mismatch"
 fi
-if [[ "$(stat -c %a "$META_OUT_DIR/$META_FILE_REL")" != "640" ]]; then
-    fail "metadata file mode mismatch"
-fi
-if [[ "$(stat -c %a "$META_OUT_DIR/$META_DIR_REL")" != "750" ]]; then
-    fail "metadata directory mode mismatch"
-fi
-if [[ "$(stat -c %Y "$META_OUT_DIR/$META_FILE_REL")" -ne "$FILE_TS" ]]; then
-    fail "metadata file mtime mismatch"
-fi
-if [[ "$(stat -c %Y "$META_OUT_DIR/$META_DIR_REL")" -ne "$DIR_TS" ]]; then
-    fail "metadata directory mtime mismatch"
+if is_windows_shell; then
+    FILE_MTIME_ACTUAL="$(stat -c %Y "$META_OUT_DIR/$META_FILE_REL")"
+    DIR_MTIME_ACTUAL="$(stat -c %Y "$META_OUT_DIR/$META_DIR_REL")"
+
+    # chmod on Windows maps to readonly semantics only, so skip strict bits.
+    if (( FILE_MTIME_ACTUAL < FILE_TS - 2 || FILE_MTIME_ACTUAL > FILE_TS + 2 )); then
+        fail "metadata file mtime mismatch"
+    fi
+    if (( DIR_MTIME_ACTUAL < DIR_TS - 2 || DIR_MTIME_ACTUAL > DIR_TS + 2 )); then
+        fail "metadata directory mtime mismatch"
+    fi
+else
+    if [[ "$(stat -c %a "$META_OUT_DIR/$META_FILE_REL")" != "640" ]]; then
+        fail "metadata file mode mismatch"
+    fi
+    if [[ "$(stat -c %a "$META_OUT_DIR/$META_DIR_REL")" != "750" ]]; then
+        fail "metadata directory mode mismatch"
+    fi
+    if [[ "$(stat -c %Y "$META_OUT_DIR/$META_FILE_REL")" -ne "$FILE_TS" ]]; then
+        fail "metadata file mtime mismatch"
+    fi
+    if [[ "$(stat -c %Y "$META_OUT_DIR/$META_DIR_REL")" -ne "$DIR_TS" ]]; then
+        fail "metadata directory mtime mismatch"
+    fi
 fi
 
 log "checking bad archive detection with truncated input"
