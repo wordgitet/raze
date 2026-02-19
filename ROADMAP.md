@@ -98,6 +98,10 @@ and strong correctness guarantees.
 
 - [ ] Expand corpus coverage (more real-world and adversarial fixtures).
 - [ ] Add regression tests for every fixed bug class (no silent reopenings).
+- [x] Add switch edge-case regressions for beta CLI surface (`-ap`,
+      `-n@`, `-x@`, `-ad1`, `-ad2`) including deterministic usage errors.
+- [x] Add split encrypted boundary corruption regression (checksum-class
+      failure path).
 - [ ] Add long-running fuzz jobs (nightly or scheduled) and triage process.
 - [ ] Add reproducible benchmark baselines for target hardware classes.
 
@@ -166,6 +170,5 @@ and strong correctness guarantees.
 
 1. Validate new `x/e/l/lt/t/p` command surface on macOS once hardware/runner
    is available; keep Windows regression coverage in MSYS2.
-2. Expand parser/command tests for switch edge-cases (`-ap`, `-n@`, `-x@`,
-   `-ad1`, `-ad2`) and ensure deterministic errors.
-3. Continue corpus + fuzz hardening work around encrypted split boundaries.
+2. Continue corpus + fuzz hardening work around encrypted split boundaries.
+3. Add long-running fuzz workflow/triage loop for sustained hardening.

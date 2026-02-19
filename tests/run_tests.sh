@@ -406,6 +406,33 @@ run_expect_exit 6 "$ROOT_DIR/raze" x -idq -o+ -pwrong -op "$TMP_DIR/out_henc_wro
 run_expect_exit 2 "$ROOT_DIR/raze" x -idq -o+ -op "$TMP_DIR/out_henc_missing" "$HENC_ARCHIVE"
 run_expect_exit_stdin_null 2 "$ROOT_DIR/raze" x -idq -o+ -p -op "$TMP_DIR/out_henc_prompt_missing" "$HENC_ARCHIVE"
 
+log "checking split encrypted payload boundary behavior"
+ENC_SPLIT_SRC_DIR="$TMP_DIR/enc_split_src"
+ENC_SPLIT_OUT_DIR="$TMP_DIR/out_enc_split"
+ENC_SPLIT_ARCHIVE="$TMP_DIR/encrypted_split_data.rar"
+mkdir -p "$ENC_SPLIT_SRC_DIR/secure"
+printf 'split encrypted fixture\n' > "$ENC_SPLIT_SRC_DIR/secure/readme.txt"
+dd if=/dev/urandom of="$ENC_SPLIT_SRC_DIR/secure/blob.bin" bs=1K count=384 status=none
+(
+    cd "$ENC_SPLIT_SRC_DIR"
+    "$RAR_BIN" a -idq -ma5 -m3 -s- -r -v120k -psecret "$ENC_SPLIT_ARCHIVE" ./secure
+)
+mapfile -t ENC_SPLIT_PARTS < <(find "$TMP_DIR" -maxdepth 1 -type f -name 'encrypted_split_data.part*.rar' | sort -V)
+if [[ "${#ENC_SPLIT_PARTS[@]}" -lt 2 ]]; then
+    fail "split encrypted fixture did not produce multiple volumes"
+fi
+run_expect_exit 0 "$ROOT_DIR/raze" x -idq -o+ -psecret -op "$ENC_SPLIT_OUT_DIR" "$TMP_DIR/encrypted_split_data.part1.rar"
+if [[ "$(dir_hash "$ENC_SPLIT_SRC_DIR")" != "$(dir_hash "$ENC_SPLIT_OUT_DIR")" ]]; then
+    fail "split encrypted extraction hash mismatch"
+fi
+for part in "${ENC_SPLIT_PARTS[@]}"; do
+    part_base="$(basename "$part")"
+    part_suffix="${part_base#encrypted_split_data.}"
+    cp "$part" "$TMP_DIR/encrypted_split_data_corrupt.${part_suffix}"
+done
+printf '\x7f' | dd of="$TMP_DIR/encrypted_split_data_corrupt.part2.rar" bs=1 seek=16384 conv=notrunc status=none
+run_expect_exit 6 "$ROOT_DIR/raze" x -idq -o+ -psecret -op "$TMP_DIR/out_enc_split_corrupt" "$TMP_DIR/encrypted_split_data_corrupt.part1.rar"
+
 log "checking BLAKE technical list and non-split verification"
 BLAKE_SRC_DIR="$TMP_DIR/blake_src"
 BLAKE_OUT_DIR="$TMP_DIR/out_blake"
