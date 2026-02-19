@@ -5,6 +5,8 @@
 #include <string.h>
 #include <sys/stat.h>
 
+#include "../platform/fs.h"
+
 #define RAZE_PATH_MAX 4096
 #define RAZE_RAR5_HOST_OS_WINDOWS 0U
 
@@ -41,7 +43,7 @@ static RazeStatus mkdir_if_needed(const char *path) {
         return RAZE_STATUS_IO;
     }
 
-    if (mkdir(path, 0777) == 0) {
+    if (raze_platform_fs_mkdir(path) == 0) {
         return RAZE_STATUS_OK;
     }
     if (errno == EEXIST) {
