@@ -401,10 +401,46 @@ static int history_get_byte(
 	return 1;
 }
 
+static void copy_history_bytes_unchecked(
+	const RazeRar5UnpackCtx *ctx,
+	size_t dict_size,
+	size_t history_pos,
+	unsigned char *dst,
+	size_t length
+)
+{
+	size_t idx;
+	size_t chunk;
+
+	if (length == 0U) {
+		return;
+	}
+
+	if (ctx->dict_filled < dict_size) {
+		memcpy(dst, ctx->dict + history_pos, length);
+		return;
+	}
+
+	idx = ctx->dict_write_pos + history_pos;
+	if (idx >= dict_size) {
+		idx -= dict_size;
+	}
+
+	chunk = dict_size - idx;
+	if (chunk > length) {
+		chunk = length;
+	}
+	memcpy(dst, ctx->dict + idx, chunk);
+	if (chunk < length) {
+		memcpy(dst + chunk, ctx->dict, length - chunk);
+	}
+}
+
 static void copy_from_output_with_overlap(unsigned char *dst, size_t length, size_t distance)
 {
 	unsigned char *src = dst - distance;
 	size_t copied;
+	size_t remaining;
 
 	if (distance == 0U) {
 		return;
@@ -415,35 +451,16 @@ static void copy_from_output_with_overlap(unsigned char *dst, size_t length, siz
 		return;
 	}
 
-	if (distance >= 8U) {
-		while (length >= 8U) {
-			dst[0] = src[0];
-			dst[1] = src[1];
-			dst[2] = src[2];
-			dst[3] = src[3];
-			dst[4] = src[4];
-			dst[5] = src[5];
-			dst[6] = src[6];
-			dst[7] = src[7];
-			src += 8;
-			dst += 8;
-			length -= 8U;
-		}
-		while (length-- > 0U) {
-			*dst++ = *src++;
-		}
-		return;
-	}
-
 	memcpy(dst, src, distance);
 	copied = distance;
-	while (copied < length) {
-		size_t chunk = copied;
-		if (chunk > length - copied) {
-			chunk = length - copied;
-		}
-		memcpy(dst + copied, dst, chunk);
-		copied += chunk;
+	remaining = length - copied;
+	while (remaining > copied) {
+		memcpy(dst + copied, dst, copied);
+		remaining -= copied;
+		copied += copied;
+	}
+	if (remaining > 0U) {
+		memcpy(dst + copied, dst, remaining);
 	}
 }
 
@@ -506,19 +523,29 @@ static int copy_match_to_output(
 	}
 
 	{
-		size_t i;
-		for (i = 0; i < length; ++i) {
-			size_t src_virtual = history_filled + out + i - distance;
-			unsigned char value;
+		size_t history_bytes = distance - out;
+		size_t history_pos = history_filled + out - distance;
+		size_t copied = 0U;
 
-			if (src_virtual < history_filled) {
-				if (!history_get_byte(ctx, dict_size, src_virtual, &value)) {
-					return 0;
-				}
-			} else {
-				value = output[src_virtual - history_filled];
-			}
-			output[out + i] = value;
+		if (history_bytes > length) {
+			history_bytes = length;
+		}
+		if (history_bytes > 0U) {
+			copy_history_bytes_unchecked(
+				ctx,
+				dict_size,
+				history_pos,
+				output + out,
+				history_bytes
+			);
+			copied = history_bytes;
+		}
+		if (copied < length) {
+			copy_from_output_with_overlap(
+				output + out + copied,
+				length - copied,
+				distance
+			);
 		}
 	}
 
@@ -594,8 +621,11 @@ void raze_rar5_unpack_ctx_free(RazeRar5UnpackCtx *ctx)
 	}
 
 	free(ctx->dict);
+	free(ctx->filter_delta_scratch);
 	ctx->dict = 0;
 	ctx->dict_capacity = 0;
+	ctx->filter_delta_scratch = 0;
+	ctx->filter_delta_scratch_size = 0U;
 	ctx->dict_write_pos = 0;
 	ctx->dict_filled = 0;
 	raze_rar5_unpack_ctx_reset_for_new_stream(ctx);
@@ -874,7 +904,15 @@ RazeStatus raze_rar5_unpack_ctx_decode_file(
 		status = RAZE_STATUS_IO;
 		goto done;
 	}
-	if (!raze_rar5_apply_filters(output, output_size, &filter_queue, &unsupported_filter)) {
+	if (filter_queue.count != 0U &&
+	    !raze_rar5_apply_filters(
+			output,
+			output_size,
+			&filter_queue,
+			&ctx->filter_delta_scratch,
+			&ctx->filter_delta_scratch_size,
+			&unsupported_filter
+		)) {
 		if (unsupported_filter) {
 			status = RAZE_STATUS_UNSUPPORTED_FEATURE;
 		} else {

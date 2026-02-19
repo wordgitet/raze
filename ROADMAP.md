@@ -60,12 +60,15 @@ and strong correctness guarantees.
 - [x] Bounded fuzz smoke target with temp corpus copy behavior.
 - [x] Split CI model: fast required PR/push workflow + nightly/manual
       hardening workflow.
+- [x] One-command local CI fallback gate (`make ci-local`).
 
 ### Performance and Benching
 
 - [x] Bench scripts for store/compressed/solid/split/encrypted.
 - [x] Standardized bench reporting (`RUNS=7`, warmup, `p50`/`p90`).
 - [x] Existing hard gates preserved where defined.
+- [x] Compressed thematic parity target met (p50 gap `<= 0%` vs `unrar -mt1`,
+      `RUNS=7`).
 
 ### Project Hygiene
 

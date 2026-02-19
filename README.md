@@ -25,6 +25,13 @@ Fast modular RAR5 decompressor project (work in progress).
 make
 ```
 
+Build defaults use performance-oriented optimization flags (`-O3`,
+`-fno-semantic-interposition`) and enable LTO by default. Disable LTO with:
+
+```sh
+make ENABLE_LTO=0
+```
+
 ## Run
 
 ```sh
@@ -50,6 +57,7 @@ make test
 make test-asan-ubsan
 make fuzz-build USE_ISAL=0
 make fuzz-smoke USE_ISAL=0 RUN_SECS=30
+make ci-local
 make bench-store
 make bench-compressed
 make bench-solid
@@ -64,6 +72,7 @@ current `raze` decode path:
 - Default: `RUNS=7`
 - Override example: `UNRAR_THREADS=8 make bench-compressed`
 - Override example: `RUNS=11 make bench-solid`
+- Optional deterministic pinning: `BENCH_CPU_CORE=2 make bench-compressed`
 - Compressed and solid benches perform one warmup run and report `p50`/`p90`.
 - Fuzz smoke runs use temporary corpus copies, so repository seed corpora stay
   unchanged.
@@ -75,6 +84,8 @@ current `raze` decode path:
 - Nightly/manual hardening CI runs separately:
   - ASan/UBSan + bounded fuzz smoke.
 - Benchmark jobs are intentionally local/manual only.
+- If GitHub Actions is account-blocked, use:
+  - `make ci-local` as the one-command local quality gate.
 
 ## Corpus Workflow
 

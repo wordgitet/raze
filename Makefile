@@ -4,10 +4,19 @@ BUILD_DIR ?= build
 USE_ISAL ?= 1
 SANITIZE ?=
 RUN_SECS ?= 30
+ENABLE_LTO ?= 1
 
-BASE_CFLAGS := -std=c11 -O2 -Wall -Wextra -Wpedantic -MMD -MP -Iinclude
+BASE_CFLAGS := -std=c11 -O3 -fno-semantic-interposition \
+	-Wall -Wextra -Wpedantic -MMD -MP -Iinclude
+BASE_LDFLAGS :=
+ifeq ($(strip $(SANITIZE)),)
+ifneq ($(ENABLE_LTO),0)
+BASE_CFLAGS += -flto
+BASE_LDFLAGS += -flto
+endif
+endif
 CFLAGS := $(BASE_CFLAGS) $(EXTRA_CFLAGS)
-LDFLAGS := $(EXTRA_LDFLAGS)
+LDFLAGS := $(BASE_LDFLAGS) $(EXTRA_LDFLAGS)
 
 OPENSSL_CFLAGS := $(shell pkg-config --cflags openssl 2>/dev/null)
 OPENSSL_LIBS := $(shell pkg-config --libs openssl 2>/dev/null)
@@ -62,7 +71,7 @@ SRCS := $(shell find src -type f -name '*.c' | sort)
 OBJS := $(patsubst %.c,$(BUILD_DIR)/%.o,$(SRCS))
 DEPS := $(OBJS:.o=.d)
 
-.PHONY: all clean run test test-parser-units test-asan-ubsan fuzz-build fuzz-smoke bench-store bench-compressed bench-solid bench-split bench-encrypted corpus corpus-fetch corpus-local corpus-themed corpus-expanded
+.PHONY: all clean run test ci-local test-parser-units test-asan-ubsan fuzz-build fuzz-smoke bench-store bench-compressed bench-solid bench-split bench-encrypted corpus corpus-fetch corpus-local corpus-themed corpus-expanded
 
 all: $(TARGET)
 
@@ -84,6 +93,12 @@ test: $(TARGET)
 	EXTRA_CFLAGS="$(TEST_EXTRA_CFLAGS)" \
 	EXTRA_LDFLAGS="$(TEST_EXTRA_LDFLAGS)" \
 	./tests/run_tests.sh
+
+ci-local: $(TARGET)
+	$(MAKE) test </dev/null
+	$(MAKE) test-asan-ubsan USE_ISAL=0
+	$(MAKE) fuzz-build USE_ISAL=0
+	$(MAKE) fuzz-smoke USE_ISAL=0 RUN_SECS=$(RUN_SECS)
 
 test-parser-units:
 	./tests/test_parser_units.sh

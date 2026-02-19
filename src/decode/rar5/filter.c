@@ -36,6 +36,30 @@ void raze_rar5_filter_queue_free(RazeRar5FilterQueue *queue) {
 	queue->cap = 0;
 }
 
+static int ensure_delta_scratch(
+	unsigned char **delta_scratch,
+	size_t *delta_scratch_size,
+	size_t need
+)
+{
+	unsigned char *expanded;
+
+	if (delta_scratch == 0 || delta_scratch_size == 0) {
+		return 0;
+	}
+	if (*delta_scratch_size >= need) {
+		return 1;
+	}
+
+	expanded = (unsigned char *)realloc(*delta_scratch, need);
+	if (expanded == 0) {
+		return 0;
+	}
+	*delta_scratch = expanded;
+	*delta_scratch_size = need;
+	return 1;
+}
+
 int raze_rar5_filter_queue_push(RazeRar5FilterQueue *queue, const RazeRar5FilterOp *op) {
 	RazeRar5FilterOp *expanded;
 	size_t new_cap;
@@ -105,7 +129,13 @@ static int apply_filter_arm(unsigned char *data, size_t data_size, uint32_t file
 	return 1;
 }
 
-static int apply_filter_delta(unsigned char *data, size_t data_size, uint32_t channels) {
+static int apply_filter_delta(
+	unsigned char *data,
+	size_t data_size,
+	uint32_t channels,
+	unsigned char **delta_scratch,
+	size_t *delta_scratch_size
+) {
 	unsigned char *tmp;
 	uint32_t cur_channel;
 	size_t src_pos = 0;
@@ -113,11 +143,14 @@ static int apply_filter_delta(unsigned char *data, size_t data_size, uint32_t ch
 	if (channels == 0U) {
 		return 0;
 	}
+	if (data_size == 0U) {
+		return 1;
+	}
 
-	tmp = (unsigned char *)malloc(data_size);
-	if (tmp == 0) {
+	if (!ensure_delta_scratch(delta_scratch, delta_scratch_size, data_size)) {
 		return 0;
 	}
+	tmp = *delta_scratch;
 
 	for (cur_channel = 0; cur_channel < channels; ++cur_channel) {
 		unsigned char prev = 0;
@@ -125,7 +158,6 @@ static int apply_filter_delta(unsigned char *data, size_t data_size, uint32_t ch
 
 		for (dest_pos = cur_channel; dest_pos < data_size; dest_pos += channels) {
 			if (src_pos >= data_size) {
-				free(tmp);
 				return 0;
 			}
 			prev = (unsigned char)(prev - data[src_pos++]);
@@ -134,7 +166,6 @@ static int apply_filter_delta(unsigned char *data, size_t data_size, uint32_t ch
 	}
 
 	memcpy(data, tmp, data_size);
-	free(tmp);
 	return 1;
 }
 
@@ -142,6 +173,8 @@ int raze_rar5_apply_filters(
 	unsigned char *data,
 	size_t data_size,
 	const RazeRar5FilterQueue *queue,
+	unsigned char **delta_scratch,
+	size_t *delta_scratch_size,
 	int *unsupported_filter
 ) {
 	size_t i;
@@ -169,7 +202,13 @@ int raze_rar5_apply_filters(
 
 		switch (op->type) {
 			case RAZE_RAR5_FILTER_DELTA:
-				if (!apply_filter_delta(block, op->block_length, op->channels)) {
+				if (!apply_filter_delta(
+						block,
+						op->block_length,
+						op->channels,
+						delta_scratch,
+						delta_scratch_size
+					)) {
 					return 0;
 				}
 				break;

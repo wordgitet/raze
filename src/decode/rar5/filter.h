@@ -35,6 +35,8 @@ int raze_rar5_apply_filters(
 	unsigned char *data,
 	size_t data_size,
 	const RazeRar5FilterQueue *queue,
+	unsigned char **delta_scratch,
+	size_t *delta_scratch_size,
 	int *unsupported_filter
 );
 

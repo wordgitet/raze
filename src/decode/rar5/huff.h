@@ -30,37 +30,33 @@ static inline int raze_rar5_br_fast_add_bits(
 	unsigned int bits
 )
 {
-	size_t advance_bytes;
-	unsigned int advance_bits;
 	size_t next_byte_pos;
+	size_t bytes_left;
+	size_t bits_left;
 	unsigned int next_bit_pos;
 
 	if (reader == 0) {
 		return 0;
 	}
-	if (reader->bit_pos > 7U || reader->byte_pos > reader->data_size) {
+
+	if (reader->byte_pos == reader->data_size && bits != 0U) {
 		return 0;
 	}
 
-	advance_bytes = (size_t)(bits >> 3U);
-	advance_bits = bits & 7U;
-	if (advance_bytes > reader->data_size - reader->byte_pos) {
+	next_byte_pos = reader->byte_pos;
+	next_bit_pos = reader->bit_pos;
+	bytes_left = reader->data_size - next_byte_pos;
+	if (bytes_left > (SIZE_MAX >> 3U)) {
 		return 0;
 	}
-	next_byte_pos = reader->byte_pos + advance_bytes;
-	next_bit_pos = reader->bit_pos + advance_bits;
-	if (next_bit_pos >= 8U) {
-		if (next_byte_pos == reader->data_size) {
-			return 0;
-		}
-		next_byte_pos += 1U;
-		next_bit_pos -= 8U;
+	bits_left = (bytes_left << 3U) - next_bit_pos;
+	if ((size_t)bits > bits_left) {
+		return 0;
 	}
 
-	if (next_byte_pos > reader->data_size ||
-	    (next_byte_pos == reader->data_size && next_bit_pos != 0U)) {
-		return 0;
-	}
+	next_bit_pos += bits;
+	next_byte_pos += (size_t)(next_bit_pos >> 3U);
+	next_bit_pos &= 7U;
 
 	reader->byte_pos = next_byte_pos;
 	reader->bit_pos = next_bit_pos;
@@ -119,12 +115,9 @@ static inline int raze_rar5_decode_number(
 		return 1;
 	}
 
-	bits = 15U;
-	for (pos = quick_bits + 1U; pos < 15U; ++pos) {
-		if (bit_field < dec->decode_len[pos]) {
-			bits = pos;
-			break;
-		}
+	bits = quick_bits + 1U;
+	while (bits < 15U && bit_field >= dec->decode_len[bits]) {
+		++bits;
 	}
 
 	if (!raze_rar5_br_fast_add_bits(reader, bits)) {

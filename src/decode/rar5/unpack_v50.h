@@ -25,6 +25,8 @@ typedef struct RazeRar5UnpackCtx {
 	uint32_t last_length;
 	unsigned char *dict;
 	size_t dict_capacity;
+	unsigned char *filter_delta_scratch;
+	size_t filter_delta_scratch_size;
 	size_t dict_write_pos;
 	size_t dict_filled;
 	size_t dict_size;

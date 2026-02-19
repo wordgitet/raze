@@ -23,6 +23,25 @@ warn() {
     printf '[bench-compressed] warning: %s\n' "$*" >&2
 }
 
+BENCH_CPU_CORE="${BENCH_CPU_CORE:-}"
+USE_TASKSET=0
+if [[ -n "$BENCH_CPU_CORE" ]]; then
+    if command -v taskset >/dev/null 2>&1; then
+        USE_TASKSET=1
+        log "pinning benchmark commands to CPU core ${BENCH_CPU_CORE}"
+    else
+        warn "BENCH_CPU_CORE is set, but taskset is unavailable; running unpinned"
+    fi
+fi
+
+run_with_affinity() {
+    if [[ "$USE_TASKSET" -eq 1 ]]; then
+        taskset -c "$BENCH_CPU_CORE" "$@"
+    else
+        "$@"
+    fi
+}
+
 median_from_stdin() {
     awk '
         { values[++count] = $1 }
@@ -69,7 +88,7 @@ run_and_measure_seconds() {
     rm -rf "$out_dir"
     mkdir -p "$out_dir"
     start_ns="$(date +%s%N)"
-    "$@" >/dev/null 2>&1
+    run_with_affinity "$@" >/dev/null 2>&1
     end_ns="$(date +%s%N)"
     awk -v s="$start_ns" -v e="$end_ns" 'BEGIN { printf "%.6f\n", (e - s) / 1000000000.0 }'
 }
