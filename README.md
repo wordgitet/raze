@@ -68,6 +68,14 @@ current `raze` decode path:
 - Fuzz smoke runs use temporary corpus copies, so repository seed corpora stay
   unchanged.
 
+## CI Policy
+
+- Fast required CI runs on every PR and push to `master`:
+  - build + rar-aware test gate + CLI smoke.
+- Nightly/manual hardening CI runs separately:
+  - ASan/UBSan + bounded fuzz smoke.
+- Benchmark jobs are intentionally local/manual only.
+
 ## Corpus Workflow
 
 Keep benchmark corpora out of git and generate them on demand.

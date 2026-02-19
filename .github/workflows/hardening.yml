@@ -1,41 +1,42 @@
 name: hardening
 
 on:
-  push:
-    branches:
-      - master
-  pull_request:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+    inputs:
+      run_secs:
+        description: "Fuzz smoke seconds per target"
+        required: false
+        default: "30"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hardening-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
-  build-and-test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Build
-        run: make -j"$(nproc)"
-      - name: Run tests
-        run: |
-          if command -v rar >/dev/null 2>&1; then
-            make test
-          else
-            echo "rar not found; running parser unit gate only"
-            make test-parser-units
-          fi
-
   asan-ubsan:
     runs-on: ubuntu-latest
-    continue-on-error: true
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
-      - name: Sanitizer parser gate (advisory)
+      - name: Sanitizer gate
         run: make test-asan-ubsan USE_ISAL=0
 
   fuzz-smoke:
     runs-on: ubuntu-latest
-    continue-on-error: true
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
-      - name: Build fuzz targets (advisory)
+      - name: Build fuzz targets
         run: make fuzz-build USE_ISAL=0
-      - name: Run bounded fuzz smoke (advisory)
-        run: make fuzz-smoke USE_ISAL=0 RUN_SECS=30
+      - name: Run bounded fuzz smoke
+        run: |
+          RUN_SECS="${{ inputs.run_secs }}"
+          if [ -z "$RUN_SECS" ]; then
+            RUN_SECS=30
+          fi
+          make fuzz-smoke USE_ISAL=0 RUN_SECS="$RUN_SECS"

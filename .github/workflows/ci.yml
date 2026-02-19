@@ -1,0 +1,36 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches:
+      - master
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build
+        run: make -j"$(nproc)"
+
+      - name: Run tests (rar-aware gate)
+        run: |
+          if command -v rar >/dev/null 2>&1; then
+            make test
+          else
+            echo "::notice::rar not found; running parser unit gate only"
+            make test-parser-units
+          fi
+
+      - name: CLI smoke
+        run: ./raze --help >/dev/null

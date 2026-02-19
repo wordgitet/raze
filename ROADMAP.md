@@ -58,7 +58,8 @@ and strong correctness guarantees.
 - [x] ASan/UBSan gate target.
 - [x] Fuzz harnesses for parser/decode entrypoints.
 - [x] Bounded fuzz smoke target with temp corpus copy behavior.
-- [x] CI workflow file for hardening checks (optional if used).
+- [x] Split CI model: fast required PR/push workflow + nightly/manual
+      hardening workflow.
 
 ### Performance and Benching
 
