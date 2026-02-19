@@ -5,6 +5,7 @@ USE_ISAL ?= 1
 SANITIZE ?=
 RUN_SECS ?= 30
 SOAK_SECS ?= 300
+CI_LOCAL_EXPANDED ?= 0
 ENABLE_LTO ?= 1
 
 BASE_CFLAGS := -std=c11 -O3 -fno-semantic-interposition \
@@ -72,7 +73,7 @@ SRCS := $(shell find src -type f -name '*.c' | sort)
 OBJS := $(patsubst %.c,$(BUILD_DIR)/%.o,$(SRCS))
 DEPS := $(OBJS:.o=.d)
 
-.PHONY: all clean run deps deps-isa-l check-isal test test-expanded ci-local test-parser-units test-asan-ubsan fuzz-build fuzz-smoke fuzz-soak bench-store bench-compressed bench-solid bench-split bench-encrypted corpus corpus-fetch corpus-local corpus-themed corpus-expanded
+.PHONY: all clean run deps deps-isa-l check-isal test test-expanded ci-local test-parser-units test-asan-ubsan fuzz-build fuzz-smoke fuzz-soak bench-store bench-compressed bench-solid bench-split bench-encrypted bench-expanded corpus corpus-fetch corpus-local corpus-themed corpus-expanded
 
 all: check-isal $(TARGET)
 
@@ -118,6 +119,9 @@ test-expanded: $(TARGET)
 
 ci-local: $(TARGET)
 	$(MAKE) test </dev/null
+ifneq ($(CI_LOCAL_EXPANDED),0)
+	$(MAKE) test-expanded </dev/null
+endif
 	$(MAKE) test-asan-ubsan USE_ISAL=0
 	$(MAKE) fuzz-build USE_ISAL=0
 	$(MAKE) fuzz-smoke USE_ISAL=0 RUN_SECS=$(RUN_SECS)
@@ -158,6 +162,9 @@ bench-split: $(TARGET)
 
 bench-encrypted: $(TARGET)
 	./bench/bench_encrypted.sh
+
+bench-expanded: $(TARGET)
+	./bench/bench_expanded.sh
 
 corpus-fetch:
 	./scripts/corpus_fetch.sh
