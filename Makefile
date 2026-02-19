@@ -71,11 +71,26 @@ SRCS := $(shell find src -type f -name '*.c' | sort)
 OBJS := $(patsubst %.c,$(BUILD_DIR)/%.o,$(SRCS))
 DEPS := $(OBJS:.o=.d)
 
-.PHONY: all clean run test ci-local test-parser-units test-asan-ubsan fuzz-build fuzz-smoke bench-store bench-compressed bench-solid bench-split bench-encrypted corpus corpus-fetch corpus-local corpus-themed corpus-expanded
+.PHONY: all clean run deps deps-isa-l check-isal test ci-local test-parser-units test-asan-ubsan fuzz-build fuzz-smoke bench-store bench-compressed bench-solid bench-split bench-encrypted corpus corpus-fetch corpus-local corpus-themed corpus-expanded
 
-all: $(TARGET)
+all: check-isal $(TARGET)
 
-$(TARGET): $(ISAL_PREREQ) $(OBJS)
+deps: deps-isa-l
+
+deps-isa-l:
+	git submodule sync -- third_party/isa-l
+	git submodule update --init --recursive third_party/isa-l
+
+check-isal:
+ifneq ($(USE_ISAL),0)
+ifeq ($(wildcard $(ISAL_MAKEFILE)),)
+	@echo "raze: ISA-L submodule is not initialized." >&2
+	@echo "raze: run 'make deps' or build with 'make USE_ISAL=0'." >&2
+	@exit 2
+endif
+endif
+
+$(TARGET): check-isal $(ISAL_PREREQ) $(OBJS)
 	$(CC) $(OBJS) -o $@ $(LDFLAGS)
 
 $(ISAL_LIB):
