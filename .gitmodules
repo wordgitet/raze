@@ -1,0 +1,3 @@
+[submodule "third_party/isa-l"]
+	path = third_party/isa-l
+	url = https://codeberg.org/wordgitet/isa-l.git
