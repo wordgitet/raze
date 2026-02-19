@@ -103,16 +103,19 @@ Unsupported switch forms are rejected with usage exit code `2`.
 
 ```sh
 make test
+make test-expanded
 make test-asan-ubsan
 make fuzz-build USE_ISAL=0
 make fuzz-smoke USE_ISAL=0 RUN_SECS=30
 make fuzz-soak USE_ISAL=0 SOAK_SECS=300
 make ci-local
+make ci-local CI_LOCAL_EXPANDED=1 RUN_SECS=30
 make bench-store
 make bench-compressed
 make bench-solid
 make bench-split
 make bench-encrypted
+make bench-expanded
 ```
 
 Bench scripts pin UnRAR to single-thread by default for fair comparison with
@@ -141,6 +144,21 @@ current `raze` decode path:
 - Benchmark jobs are intentionally local/manual only.
 - If GitHub Actions is account-blocked, use:
   - `make ci-local` as the one-command local quality gate.
+- Optional expanded-corpus gate:
+  - `make ci-local CI_LOCAL_EXPANDED=1 RUN_SECS=30`
+
+## Expanded Corpus Validation
+
+Use expanded local stress/adversarial fixtures as a dedicated local gate:
+
+```sh
+make corpus-expanded
+make test-expanded
+make bench-expanded
+```
+
+`make test` remains fast and unchanged. Expanded validation is opt-in via
+`test-expanded` (or `CI_LOCAL_EXPANDED=1` in `ci-local`).
 
 ## Corpus Workflow
 

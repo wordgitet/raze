@@ -17,10 +17,19 @@ Test suites for parser, decoder, and end-to-end extraction.
 - CLI compatibility subset checks (filters/path behavior) and strict
   malformed-switch rejection.
 
+`make test-expanded` runs expanded corpus integration checks:
+
+- store/fast/solid hash-parity extraction on expanded fixtures,
+- encrypted and encrypted-header extraction with password behavior checks,
+- BLAKE list/extract checks on expanded `-htb` archives,
+- split extraction + missing-volume failure mapping,
+- corruption regressions for truncated and bitflipped expanded variants.
+
 Run:
 
 ```sh
 make test
+make test-expanded
 ```
 
 Hardening helpers:

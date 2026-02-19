@@ -96,7 +96,10 @@ and strong correctness guarantees.
 
 ### Quality and Validation
 
-- [ ] Expand corpus coverage (more real-world and adversarial fixtures).
+- [x] Expand local corpus coverage with expanded stress/adversarial fixtures
+      and dedicated local gates (`make test-expanded`, `make bench-expanded`).
+- [ ] Expand external corpus coverage (calgary/canterbury/enwik8) beyond
+      optional/manual runs.
 - [ ] Add regression tests for every fixed bug class (no silent reopenings).
 - [x] Add switch edge-case regressions for beta CLI surface (`-ap`,
       `-n@`, `-x@`, `-ad1`, `-ad2`) including deterministic usage errors.
@@ -172,5 +175,5 @@ and strong correctness guarantees.
 
 1. Validate new `x/e/l/lt/t/p` command surface on macOS once hardware/runner
    is available; keep Windows regression coverage in MSYS2.
-2. Expand corpus coverage with additional real-world/adversarial fixtures.
+2. Expand external corpus coverage from optional/manual to a tracked profile.
 3. Add long-running fuzz execution cadence and bug triage tracking routine.

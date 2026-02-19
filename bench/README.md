@@ -9,7 +9,8 @@ Defaults:
 - one warmup run per tool/archive before timed runs
 - reports `p50` and `p90`
 - hard fail gates: `bench-store`, `bench-encrypted` (must be <=10% slower)
-- warning-only target checks: `bench-compressed`, `bench-solid`, `bench-split`
+- warning-only target checks: `bench-compressed`, `bench-solid`,
+  `bench-split`, `bench-expanded`
 - `bench-encrypted` prints both `data-encrypted` and `header-encrypted` results
   before the final pass/fail decision.
 
@@ -21,6 +22,7 @@ make bench-compressed
 make bench-solid
 make bench-split
 make bench-encrypted
+make bench-expanded
 ```
 
 Override examples:
