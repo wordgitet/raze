@@ -72,7 +72,7 @@ SRCS := $(shell find src -type f -name '*.c' | sort)
 OBJS := $(patsubst %.c,$(BUILD_DIR)/%.o,$(SRCS))
 DEPS := $(OBJS:.o=.d)
 
-.PHONY: all clean run deps deps-isa-l check-isal test ci-local test-parser-units test-asan-ubsan fuzz-build fuzz-smoke fuzz-soak bench-store bench-compressed bench-solid bench-split bench-encrypted corpus corpus-fetch corpus-local corpus-themed corpus-expanded
+.PHONY: all clean run deps deps-isa-l check-isal test test-expanded ci-local test-parser-units test-asan-ubsan fuzz-build fuzz-smoke fuzz-soak bench-store bench-compressed bench-solid bench-split bench-encrypted corpus corpus-fetch corpus-local corpus-themed corpus-expanded
 
 all: check-isal $(TARGET)
 
@@ -109,6 +109,12 @@ test: $(TARGET)
 	EXTRA_CFLAGS="$(TEST_EXTRA_CFLAGS)" \
 	EXTRA_LDFLAGS="$(TEST_EXTRA_LDFLAGS)" \
 	./tests/run_tests.sh
+
+test-expanded: $(TARGET)
+	CC="$(CC)" \
+	EXTRA_CFLAGS="$(TEST_EXTRA_CFLAGS)" \
+	EXTRA_LDFLAGS="$(TEST_EXTRA_LDFLAGS)" \
+	./tests/run_tests_expanded.sh
 
 ci-local: $(TARGET)
 	$(MAKE) test </dev/null

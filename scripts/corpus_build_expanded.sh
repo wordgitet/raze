@@ -330,22 +330,25 @@ write_truncated_copy() {
 write_bitflip_copy() {
 	local src="$1"
 	local dst="$2"
+	local preferred_offset="${3:-}"
 	local size
 	local offset
 
 	cp "$src" "$dst"
 	size="$(stat -c%s "$src")"
-	if [[ "$size" -le 4096 ]]; then
+	if [[ -n "$preferred_offset" && "$preferred_offset" -lt "$size" ]]; then
+		offset="$preferred_offset"
+	elif [[ "$size" -le 32768 ]]; then
 		offset="$((size / 2))"
 	else
-		offset=4096
+		offset=32768
 	fi
 	printf '\xff' | dd of="$dst" bs=1 seek="$offset" conv=notrunc status=none
 }
 
 build_corrupt_set() {
 	local stamp_path="$STAMP_DIR/corrupt_set.stamp"
-	local stamp_key="${SOURCE_FINGERPRINT}|$(rar_version)|corrupt-v1"
+	local stamp_key="${SOURCE_FINGERPRINT}|$(rar_version)|corrupt-v3"
 	local split_copy_root="$CORRUPT_DIR/expanded_fast_split_missing"
 
 	if [[ "$FORCE" -eq 0 && -f "$stamp_path" ]]; then
@@ -365,11 +368,13 @@ build_corrupt_set() {
 
 	write_bitflip_copy \
 		"$ARCHIVE_DIR/expanded_best_htb.rar" \
-		"$CORRUPT_DIR/expanded_best_htb_bitflip.rar"
+		"$CORRUPT_DIR/expanded_best_htb_bitflip.rar" \
+		131072
 
 	write_bitflip_copy \
 		"$ARCHIVE_DIR/expanded_best_encrypted_htb.rar" \
-		"$CORRUPT_DIR/expanded_best_encrypted_htb_bitflip.rar"
+		"$CORRUPT_DIR/expanded_best_encrypted_htb_bitflip.rar" \
+		2228224
 
 	cp "$ARCHIVE_DIR"/expanded_fast_split.part*.rar "$CORRUPT_DIR"/
 	rm -f "$CORRUPT_DIR/expanded_fast_split.part2.rar"
