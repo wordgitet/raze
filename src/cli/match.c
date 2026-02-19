@@ -1,6 +1,5 @@
 #include "match.h"
 
-#include <fnmatch.h>
 #include <string.h>
 
 static const char *basename_ptr(const char *s)
@@ -66,6 +65,47 @@ static int prefix_ok(const char *entry, const char *prefix)
 	return entry[n] == '\0' || entry[n] == '/';
 }
 
+static int wildcard_match(const char *pattern, const char *text)
+{
+	const char *pat;
+	const char *str;
+	const char *star;
+	const char *retry;
+
+	if (pattern == 0 || text == 0) {
+		return 0;
+	}
+
+	pat = pattern;
+	str = text;
+	star = 0;
+	retry = 0;
+
+	while (*str != '\0') {
+		if (*pat == '*') {
+			star = pat++;
+			retry = str;
+			continue;
+		}
+		if (*pat == '?' || *pat == *str) {
+			pat++;
+			str++;
+			continue;
+		}
+		if (star != 0) {
+			pat = star + 1;
+			str = ++retry;
+			continue;
+		}
+		return 0;
+	}
+
+	while (*pat == '*') {
+		pat++;
+	}
+	return *pat == '\0';
+}
+
 static int match_any(
 	const char *entry,
 	const char *basename,
@@ -85,7 +125,7 @@ static int match_any(
 			continue;
 		}
 		target = (!recurse && !has_path_sep(pat)) ? basename : entry;
-		if (fnmatch(pat, target, 0) == 0) {
+		if (wildcard_match(pat, target)) {
 			return 1;
 		}
 	}
