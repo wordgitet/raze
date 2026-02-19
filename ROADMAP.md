@@ -118,11 +118,13 @@ and strong correctness guarantees.
 - [x] Introduce a small portability layer for filesystem/path/time/tty behavior.
 - [ ] Remove Linux-only assumptions from CLI and I/O edge paths.
 - [ ] Bring up and validate macOS build + test flow.
-- [ ] Bring up and validate Windows build + test flow.
+- [x] Bring up and validate Windows build + test flow (MSYS2 UCRT64:
+      `make` + `make test`).
 - [ ] Add experimental validation path for `*BSD` (best-effort tier).
 - [ ] Add experimental validation path for QNX (best-effort tier).
 - [x] Publish platform support tiers:
-      Linux/macOS/Windows as target supported, `*BSD`/QNX as experimental.
+      Linux/Windows as supported in beta-prep, macOS as target (unverified),
+      `*BSD`/QNX as experimental.
 
 ### Beta Exit Criteria
 
@@ -162,8 +164,8 @@ and strong correctness guarantees.
 
 ## Current Focus (Near-Term)
 
-1. Validate new `x/e/l/lt/t/p` command surface on macOS and Windows build
-   environments.
+1. Validate new `x/e/l/lt/t/p` command surface on macOS once hardware/runner
+   is available; keep Windows regression coverage in MSYS2.
 2. Expand parser/command tests for switch edge-cases (`-ap`, `-n@`, `-x@`,
    `-ad1`, `-ad2`) and ensure deterministic errors.
 3. Continue corpus + fuzz hardening work around encrypted split boundaries.

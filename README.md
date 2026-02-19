@@ -7,7 +7,9 @@ Fast modular RAR5 decompressor project (work in progress).
 - Project maturity: **alpha** (interfaces and behavior can still change).
 - Platform status:
   - Linux: supported baseline.
-  - macOS/Windows: beta-prep bring-up target (CMake path available).
+  - Windows: beta-prep supported path (validated via MSYS2 UCRT64:
+    `make` + `make test`).
+  - macOS: beta-prep target (currently unverified: no host/runner).
   - *BSD/QNX: experimental.
 
 ## Layout
