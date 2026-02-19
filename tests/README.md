@@ -29,4 +29,9 @@ Hardening helpers:
 make test-asan-ubsan
 make fuzz-build USE_ISAL=0
 make fuzz-smoke USE_ISAL=0 RUN_SECS=30
+make fuzz-soak USE_ISAL=0 SOAK_SECS=300
 ```
+
+`fuzz-soak` keeps per-run artifacts under
+`build/fuzz-soak/<timestamp>/artifacts/` for crash triage/replay.
+See `tests/fuzz/TRIAGE.md` for replay/minimization workflow.

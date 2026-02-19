@@ -106,6 +106,7 @@ make test
 make test-asan-ubsan
 make fuzz-build USE_ISAL=0
 make fuzz-smoke USE_ISAL=0 RUN_SECS=30
+make fuzz-soak USE_ISAL=0 SOAK_SECS=300
 make ci-local
 make bench-store
 make bench-compressed
@@ -125,6 +126,8 @@ current `raze` decode path:
 - Compressed and solid benches perform one warmup run and report `p50`/`p90`.
 - Fuzz smoke runs use temporary corpus copies, so repository seed corpora stay
   unchanged.
+- Fuzz soak runs keep artifacts under `build/fuzz-soak/<timestamp>/` for
+  replay and triage.
 - On Windows/MSYS test runs, archive `mtime` restoration can be environment-
   dependent; metadata `mtime` assertions are logged as informational notes
   rather than hard failures.

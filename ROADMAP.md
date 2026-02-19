@@ -102,7 +102,8 @@ and strong correctness guarantees.
       `-n@`, `-x@`, `-ad1`, `-ad2`) including deterministic usage errors.
 - [x] Add split encrypted boundary corruption regression (checksum-class
       failure path).
-- [ ] Add long-running fuzz jobs (nightly or scheduled) and triage process.
+- [x] Add long-running local fuzz soak target + triage process
+      (`make fuzz-soak`, `tests/fuzz/TRIAGE.md`).
 - [ ] Add reproducible benchmark baselines for target hardware classes.
 
 ### Performance
@@ -170,5 +171,5 @@ and strong correctness guarantees.
 
 1. Validate new `x/e/l/lt/t/p` command surface on macOS once hardware/runner
    is available; keep Windows regression coverage in MSYS2.
-2. Continue corpus + fuzz hardening work around encrypted split boundaries.
-3. Add long-running fuzz workflow/triage loop for sustained hardening.
+2. Add reproducible benchmark baselines for target hardware classes.
+3. Expand corpus coverage with additional real-world/adversarial fixtures.

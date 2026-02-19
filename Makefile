@@ -4,6 +4,7 @@ BUILD_DIR ?= build
 USE_ISAL ?= 1
 SANITIZE ?=
 RUN_SECS ?= 30
+SOAK_SECS ?= 300
 ENABLE_LTO ?= 1
 
 BASE_CFLAGS := -std=c11 -O3 -fno-semantic-interposition \
@@ -71,7 +72,7 @@ SRCS := $(shell find src -type f -name '*.c' | sort)
 OBJS := $(patsubst %.c,$(BUILD_DIR)/%.o,$(SRCS))
 DEPS := $(OBJS:.o=.d)
 
-.PHONY: all clean run deps deps-isa-l check-isal test ci-local test-parser-units test-asan-ubsan fuzz-build fuzz-smoke bench-store bench-compressed bench-solid bench-split bench-encrypted corpus corpus-fetch corpus-local corpus-themed corpus-expanded
+.PHONY: all clean run deps deps-isa-l check-isal test ci-local test-parser-units test-asan-ubsan fuzz-build fuzz-smoke fuzz-soak bench-store bench-compressed bench-solid bench-split bench-encrypted corpus corpus-fetch corpus-local corpus-themed corpus-expanded
 
 all: check-isal $(TARGET)
 
@@ -133,6 +134,9 @@ fuzz-build: $(FUZZ_ISAL_PREREQ) $(FUZZ_TARGETS)
 
 fuzz-smoke: fuzz-build
 	./tests/fuzz/run_fuzz_smoke.sh "$(FUZZ_BUILD_DIR)" "$(RUN_SECS)"
+
+fuzz-soak: fuzz-build
+	./tests/fuzz/run_fuzz_soak.sh "$(FUZZ_BUILD_DIR)" "$(SOAK_SECS)"
 
 bench-store: $(TARGET)
 	./bench/bench_store.sh
