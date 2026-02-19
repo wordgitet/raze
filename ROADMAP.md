@@ -25,6 +25,7 @@ and strong correctness guarantees.
 - [x] Baseline corpus and benchmark harness.
 - [x] Downloadable corpus manifest + scripts.
 - [x] Local corpus generation scripts and re-run detection.
+- [x] Expanded local corpus matrix (stress fixtures + corrupt variants).
 - [x] RAR5 signature scan and SFX-prefixed scan support.
 - [x] RAR5 block iteration + vint decode.
 - [x] Header CRC validation.

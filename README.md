@@ -82,6 +82,10 @@ make corpus-local
 # Generate themed local corpora (audio/images/database/source-code mixes).
 make corpus-themed
 
+# Generate expanded stress corpus (small-files, text/binary/db/path/source,
+# plus encrypted/split/corrupt variants).
+make corpus-expanded
+
 # Do both steps.
 make corpus
 ```

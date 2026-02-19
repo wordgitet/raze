@@ -62,7 +62,7 @@ SRCS := $(shell find src -type f -name '*.c' | sort)
 OBJS := $(patsubst %.c,$(BUILD_DIR)/%.o,$(SRCS))
 DEPS := $(OBJS:.o=.d)
 
-.PHONY: all clean run test test-parser-units test-asan-ubsan fuzz-build fuzz-smoke bench-store bench-compressed bench-solid bench-split bench-encrypted corpus corpus-fetch corpus-local corpus-themed
+.PHONY: all clean run test test-parser-units test-asan-ubsan fuzz-build fuzz-smoke bench-store bench-compressed bench-solid bench-split bench-encrypted corpus corpus-fetch corpus-local corpus-themed corpus-expanded
 
 all: $(TARGET)
 
@@ -127,6 +127,9 @@ corpus-local:
 
 corpus-themed:
 	./scripts/corpus_build_thematic.sh
+
+corpus-expanded:
+	./scripts/corpus_build_expanded.sh
 
 corpus: corpus-fetch corpus-local corpus-themed
 
