@@ -188,8 +188,68 @@ if [[ "$rc" -ne 0 ]]; then
     fail "list command with -idq failed with exit $rc"
 fi
 
+log "checking -ap include-prefix filtering for list and extract"
+LIST_AP_OUT="$TMP_DIR/list_ap_output.txt"
+set +e
+"$ROOT_DIR/raze" l -aptree "$ARCHIVE_STORE" > "$LIST_AP_OUT"
+rc=$?
+set -e
+if [[ "$rc" -ne 0 ]]; then
+    fail "list command with -ap failed with exit $rc"
+fi
+if ! grep -Fq "tree/file_1.txt" "$LIST_AP_OUT"; then
+    fail "list -ap output missing expected tree/file_1.txt"
+fi
+if grep -Fq "small_text.txt" "$LIST_AP_OUT"; then
+    fail "list -ap output unexpectedly included small_text.txt"
+fi
+run_expect_exit 0 "$ROOT_DIR/raze" x -idq -o+ -aptree -op "$TMP_DIR/out_ap" "$ARCHIVE_STORE"
+if [[ ! -f "$TMP_DIR/out_ap/tree/file_1.txt" ]]; then
+    fail "extract -ap output missing expected tree/file_1.txt"
+fi
+if [[ -f "$TMP_DIR/out_ap/small_text.txt" ]]; then
+    fail "extract -ap output unexpectedly included small_text.txt"
+fi
+
+log "checking -n@ and -x@ list-file filtering"
+printf 'small_text.txt\n' > "$TMP_DIR/include.list"
+run_expect_exit 0 "$ROOT_DIR/raze" x -idq -o+ -n@"$TMP_DIR/include.list" -op "$TMP_DIR/out_n_at" "$ARCHIVE_STORE"
+if [[ ! -f "$TMP_DIR/out_n_at/small_text.txt" ]]; then
+    fail "extract -n@ output missing expected small_text.txt"
+fi
+if [[ -f "$TMP_DIR/out_n_at/medium_text.txt" ]]; then
+    fail "extract -n@ output unexpectedly included medium_text.txt"
+fi
+printf 'tree/*\n' > "$TMP_DIR/exclude.list"
+run_expect_exit 0 "$ROOT_DIR/raze" x -idq -o+ -x@"$TMP_DIR/exclude.list" -op "$TMP_DIR/out_x_at" "$ARCHIVE_STORE"
+if [[ ! -f "$TMP_DIR/out_x_at/small_text.txt" ]]; then
+    fail "extract -x@ output missing expected small_text.txt"
+fi
+if [[ -f "$TMP_DIR/out_x_at/tree/file_1.txt" ]]; then
+    fail "extract -x@ output unexpectedly included tree/file_1.txt"
+fi
+
+log "checking -ad1/-ad2 destination variants"
+run_expect_exit 0 "$ROOT_DIR/raze" x -idq -o+ -ad1 -op "$TMP_DIR/out_ad1" "$ARCHIVE_STORE"
+if [[ ! -f "$TMP_DIR/out_ad1/local_store/small_text.txt" ]]; then
+    fail "extract -ad1 output missing expected local_store/small_text.txt"
+fi
+run_expect_exit 0 "$ROOT_DIR/raze" x -idq -o+ -ad2 -op "$TMP_DIR/out_ad2" "$ARCHIVE_STORE"
+if [[ ! -f "$TMP_DIR/out_ad2/local_store.rar/small_text.txt" ]]; then
+    fail "extract -ad2 output missing expected local_store.rar/small_text.txt"
+fi
+
 log "checking -o switch compatibility (bare -o must be rejected)"
 run_expect_exit 2 "$ROOT_DIR/raze" x -idq -o "$ARCHIVE_STORE"
+
+log "checking malformed and invalid switch forms return usage exit"
+run_expect_exit 2 "$ROOT_DIR/raze" x -idq -ap "$ARCHIVE_STORE"
+run_expect_exit 2 "$ROOT_DIR/raze" x -idq -n@ "$ARCHIVE_STORE"
+run_expect_exit 2 "$ROOT_DIR/raze" x -idq -x@ "$ARCHIVE_STORE"
+run_expect_exit 2 "$ROOT_DIR/raze" x -idq -n@"$TMP_DIR/does-not-exist.list" "$ARCHIVE_STORE"
+run_expect_exit 2 "$ROOT_DIR/raze" x -idq -ad3 "$ARCHIVE_STORE"
+run_expect_exit 2 "$ROOT_DIR/raze" l -ad1 "$ARCHIVE_STORE"
+run_expect_exit 2 "$ROOT_DIR/raze" t -op "$TMP_DIR/out_invalid_op" "$ARCHIVE_STORE"
 
 log "checking e command path-stripping behavior"
 run_expect_exit 0 "$ROOT_DIR/raze" e -idq -o+ -op "$TMP_DIR/out_e" "$ARCHIVE_STORE"
