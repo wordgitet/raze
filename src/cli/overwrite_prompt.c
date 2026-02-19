@@ -1,9 +1,12 @@
 #include "overwrite_prompt.h"
 
 #include <ctype.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
-#include <unistd.h>
+#include <time.h>
+
+#include "../platform/tty.h"
 
 static void format_time_value(time_t value, int present, char *out, size_t out_len) {
     struct tm tm_value;
@@ -53,7 +56,8 @@ void raze_overwrite_prompt_init(RazeOverwritePrompt *prompt, RazeOverwriteMode m
     prompt->mode = mode;
     prompt->replace_all = 0;
     prompt->skip_all = 0;
-    prompt->interactive = isatty(STDIN_FILENO) && isatty(STDOUT_FILENO);
+    prompt->interactive = raze_platform_stdin_is_tty() &&
+                          raze_platform_stdout_is_tty();
 }
 
 RazeOverwriteDecision raze_overwrite_prompt_decide(
@@ -89,7 +93,11 @@ RazeOverwriteDecision raze_overwrite_prompt_decide(
     for (;;) {
         fprintf(stderr, "Overwrite? [yes/no/all/no-all]: ");
         if (fgets(line, sizeof(line), stdin) == 0) {
-            return RAZE_OVERWRITE_DECISION_ABORT;
+            /*
+             * EOF on stdin (for example redirected /dev/null in CI)
+             * is treated as non-interactive collision handling.
+             */
+            return RAZE_OVERWRITE_DECISION_ERROR;
         }
         trim_line(line);
         if (strcmp(line, "yes") == 0 || strcmp(line, "y") == 0) {
