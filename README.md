@@ -114,6 +114,7 @@ make bench-store
 make bench-compressed
 make bench-solid
 make bench-hot-solid
+make bench-hot-solid-stable
 make bench-split
 make bench-encrypted
 make bench-expanded
@@ -136,6 +137,10 @@ current `raze` decode path:
   - report path: `docs/perf/hot/YYYY-MM-DD_HHMMSS_hot_solid.md`
   - optional hard fail: `ENFORCE_GATE=1 TARGET_GAP_PCT=10`
   - optional pinning: `BENCH_CPU_CORE=2 RUNS=11 make bench-hot-solid`
+- Stable hot-solid benchmark wrapper (hard fail by default):
+  - `make bench-hot-solid-stable`
+  - defaults: `STABLE_REPEATS=3`, `STABLE_RUNS=11`, `STABLE_GAP_PCT=0`
+  - report path: `docs/perf/hot/YYYY-MM-DD_HHMMSS_hot_solid_stable.md`
 - External corpus bench is hard-fail by default and writes dated reports:
   - `RUNS=7 make bench-external`
   - report path: `docs/perf/external/YYYY-MM-DD_HHMMSS_external_bench.md`
@@ -252,6 +257,10 @@ Scripts detect already downloaded/generated artifacts and skip unnecessary work.
   - `RAZE_PROFILE_ENC=1 ./raze x -psecret -opout archive.rar`
   - prints per-entry/archive timings for `kdf`, `decrypt`, `unpack`,
     `hash_verify`, and `write`.
+- RAR5 unpack hot-loop counters can be enabled for decode triage:
+  - `RAZE_PROFILE_UNPACK=1 ./raze x -idq -o+ -opout archive.rar`
+  - prints symbol mix, distance-bin frequencies, table reload count,
+    and bitreader fast-path hit ratios.
 
 ## UnRAR Compatibility Reference
 

@@ -1,12 +1,13 @@
 # Performance Baseline (Reproducible)
 
-Date: 2026-02-19
+Date: 2026-02-20
 
 Comparator: `unrar -mt1`
 
 ## Run profile
 
-- `RUNS=7`
+- external matrix: `RUNS=7`
+- hot-solid stability: `STABLE_REPEATS=3`, `STABLE_RUNS=11`
 - warmup enabled in bench scripts
 - CPU pinning: `BENCH_CPU_CORE=2`
 - threads: `UNRAR_THREADS=1`
@@ -18,59 +19,41 @@ Comparator: `unrar -mt1`
 - Compiler: `gcc 13.3.0`
 - OpenSSL: `3.0.15`
 
-## Results (p50/p90)
+## External Matrix Snapshot
 
-### Store
+Source report: `docs/perf/external/2026-02-20_153312_external_bench.md`
 
-- `bench_store_baseline.txt`
-  - raze: `p50=0.020020s`, `p90=0.020836s`
-  - unrar: `p50=0.053350s`, `p90=0.055403s`
-  - gap vs unrar: `-62.47%`
+| Corpus | Mode | Gap % |
+|---|---|---:|
+| calgary | store | -38.79 |
+| calgary | fast | -4.34 |
+| calgary | solid | 5.54 |
+| calgary | encrypted-data | -14.29 |
+| calgary | encrypted-headers | -52.45 |
+| canterbury | store | -35.97 |
+| canterbury | fast | -0.42 |
+| canterbury | solid | 1.47 |
+| canterbury | encrypted-data | -17.02 |
+| canterbury | encrypted-headers | -58.09 |
+| enwik8 | store | 1.12 |
+| enwik8 | fast | 0.59 |
+| enwik8 | solid | 5.40 |
+| enwik8 | encrypted-data | 0.50 |
+| enwik8 | encrypted-headers | -4.67 |
 
-### Compressed
+Result: hard external gate passes at `TARGET_GAP_PCT=10`.
 
-- `local_fast.rar`
-  - raze: `p50=0.023595s`, `p90=0.029619s`
-  - unrar: `p50=0.069332s`, `p90=0.071259s`
-  - gap: `-65.97%`
-- `thematic_fast.rar`
-  - raze: `p50=0.164989s`, `p90=0.166053s`
-  - unrar: `p50=0.169251s`, `p90=0.171048s`
-  - gap: `-2.52%`
+## Hot Solid Stability Snapshot
 
-### Solid
+Source report: `docs/perf/hot/2026-02-20_153446_hot_solid_stable.md`
 
-- `local_best_solid.rar`
-  - raze: `p50=0.076385s`, `p90=0.078881s`
-  - unrar: `p50=0.093467s`, `p90=0.094624s`
-  - gap: `-18.28%`
-- `thematic_best_solid.rar`
-  - raze: `p50=0.166296s`, `p90=0.171220s`
-  - unrar: `p50=0.177822s`, `p90=0.178865s`
-  - gap: `-6.48%`
+- Attempt 1: gap `5.51%`
+- Attempt 2: gap `5.91%`
+- Attempt 3: gap `6.01%`
 
-### Split
+Result: stable `<=0%` target is not yet met.
 
-- `bench_split_baseline.txt`
-  - raze: `p50=0.010908s`, `p90=0.011391s`
-  - unrar: `p50=0.011513s`, `p90=0.012061s`
-  - gap vs unrar: `-5.25%`
+## Notes
 
-### Encrypted
-
-- `data-encrypted`
-  - raze: `p50=0.026946s`, `p90=0.028135s`
-  - unrar: `p50=0.032938s`, `p90=0.040524s`
-  - gap: `-18.19%`
-- `header-encrypted`
-  - raze: `p50=0.026625s`, `p90=0.027290s`
-  - unrar: `p50=0.057334s`, `p90=0.058142s`
-  - gap: `-53.56%`
-
-## Raw logs
-
-- `docs/perf/bench_store_baseline.txt`
-- `docs/perf/bench_compressed_baseline.txt`
-- `docs/perf/bench_solid_baseline.txt`
-- `docs/perf/bench_split_baseline.txt`
-- `docs/perf/bench_encrypted_baseline.txt`
+- External matrix is stable and within the hard `<=10%` gate.
+- Remaining performance focus is `enwik8/solid` single-thread parity/win.

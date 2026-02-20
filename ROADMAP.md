@@ -122,7 +122,9 @@ and strong correctness guarantees.
       kernels, and sanitizer/functional gates kept green).
 - [x] Add benchmark reproducibility controls for perf triage
       (`BENCH_CPU_CORE` support in external/hot benchmark harnesses).
-- [ ] Track and report deltas against `unrar -mt1` per bench family.
+- [x] Track and report deltas against `unrar -mt1` per bench family.
+- [x] Add repeated hot-solid stability harness
+      (`make bench-hot-solid-stable`) with consolidated dated reports.
 
 ### Packaging and Developer UX
 
@@ -223,10 +225,12 @@ and strong correctness guarantees.
 
 1. Validate new `x/e/l/lt/t/p` command surface on macOS once hardware/runner
    is available; keep Windows regression coverage in MSYS2.
-2. Stabilize and document low-variance perf baselines using pinned benchmark
-   runs (`BENCH_CPU_CORE`) and `RUNS=7` reports under `docs/perf/`.
-3. Track external matrix drift (`store/fast/solid/encrypted`) against
-   `unrar -mt1` and keep the hard gap gate (`TARGET_GAP_PCT=10`) reliable.
+2. Keep external matrix drift (`store/fast/solid/encrypted`) against
+   `unrar -mt1` under the hard gap gate (`TARGET_GAP_PCT=10`) and refresh
+   reports in `docs/perf/external/`.
+3. Close the remaining `enwik8/solid` single-thread gap from current
+   ~`+5-6%` toward stable `<= 0%` parity/win over repeated pinned runs
+   (`make bench-hot-solid-stable`).
 4. Add long-running fuzz execution cadence and bug triage tracking routine.
 5. Keep legacy RAR4-and-below support scoped for post-beta/RC planning
    (separate milestone after stable RAR5 release candidate quality gates).
