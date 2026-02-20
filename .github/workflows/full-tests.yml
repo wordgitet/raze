@@ -10,7 +10,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: full-tests-${{ github.ref }}
+  group: full-tests-${{ github.ref }}-${{ github.event_name }}
   cancel-in-progress: true
 
 jobs:
