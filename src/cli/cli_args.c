@@ -305,11 +305,20 @@ static int parse_switch(
 		return 1;
 	}
 	if (strncmp(arg, "-n@", 3) == 0) {
-		if (arg[3] == '\0') {
-			set_err(errbuf, errbuf_size, "missing file list path for -n@");
-			return 0;
+		const char *list_path = 0;
+
+		if (arg[3] != '\0') {
+			list_path = arg + 3;
+		} else {
+			if (*index + 1 >= argc) {
+				set_err(errbuf, errbuf_size,
+					"missing file list path for -n@");
+				return 0;
+			}
+			*index += 1;
+			list_path = argv[*index];
 		}
-		if (!vec_load_file(&out->sw.includes, arg + 3)) {
+		if (!vec_load_file(&out->sw.includes, list_path)) {
 			set_err(errbuf, errbuf_size,
 				"failed to read include list file");
 			return 0;
@@ -317,11 +326,20 @@ static int parse_switch(
 		return 1;
 	}
 	if (strncmp(arg, "-x@", 3) == 0) {
-		if (arg[3] == '\0') {
-			set_err(errbuf, errbuf_size, "missing file list path for -x@");
-			return 0;
+		const char *list_path = 0;
+
+		if (arg[3] != '\0') {
+			list_path = arg + 3;
+		} else {
+			if (*index + 1 >= argc) {
+				set_err(errbuf, errbuf_size,
+					"missing file list path for -x@");
+				return 0;
+			}
+			*index += 1;
+			list_path = argv[*index];
 		}
-		if (!vec_load_file(&out->sw.excludes, arg + 3)) {
+		if (!vec_load_file(&out->sw.excludes, list_path)) {
 			set_err(errbuf, errbuf_size,
 				"failed to read exclude list file");
 			return 0;

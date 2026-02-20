@@ -31,7 +31,8 @@ static void print_usage(const char *prog)
 	printf("  -ad1, -ad2              destination variants (x/e)\n");
 	printf("  -r                      recurse masks\n");
 	printf("  -n<mask>, -x<mask>      include/exclude mask\n");
-	printf("  -n@<list>, -x@<list>    include/exclude masks from file\n");
+	printf("  -n@<list>/-n@ <list>    include masks from file\n");
+	printf("  -x@<list>/-x@ <list>    exclude masks from file\n");
 	printf("  -ap<path>               internal archive prefix filter\n");
 	printf("  -p[password]            password (-p prompts on tty)\n");
 	printf("  -cfg-                   compatibility no-op\n");

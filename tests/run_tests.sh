@@ -213,7 +213,7 @@ fi
 
 log "checking -n@ and -x@ list-file filtering"
 printf 'small_text.txt\n' > "$TMP_DIR/include.list"
-run_expect_exit 0 "$ROOT_DIR/raze" x -idq -o+ -n@"$TMP_DIR/include.list" -op "$TMP_DIR/out_n_at" "$ARCHIVE_STORE"
+run_expect_exit 0 "$ROOT_DIR/raze" x -idq -o+ -n@ "$TMP_DIR/include.list" -op "$TMP_DIR/out_n_at" "$ARCHIVE_STORE"
 if [[ ! -f "$TMP_DIR/out_n_at/small_text.txt" ]]; then
     fail "extract -n@ output missing expected small_text.txt"
 fi
@@ -221,7 +221,7 @@ if [[ -f "$TMP_DIR/out_n_at/medium_text.txt" ]]; then
     fail "extract -n@ output unexpectedly included medium_text.txt"
 fi
 printf 'tree/*\n' > "$TMP_DIR/exclude.list"
-run_expect_exit 0 "$ROOT_DIR/raze" x -idq -o+ -x@"$TMP_DIR/exclude.list" -op "$TMP_DIR/out_x_at" "$ARCHIVE_STORE"
+run_expect_exit 0 "$ROOT_DIR/raze" x -idq -o+ -x@ "$TMP_DIR/exclude.list" -op "$TMP_DIR/out_x_at" "$ARCHIVE_STORE"
 if [[ ! -f "$TMP_DIR/out_x_at/small_text.txt" ]]; then
     fail "extract -x@ output missing expected small_text.txt"
 fi
@@ -244,8 +244,8 @@ run_expect_exit 2 "$ROOT_DIR/raze" x -idq -o "$ARCHIVE_STORE"
 
 log "checking malformed and invalid switch forms return usage exit"
 run_expect_exit 2 "$ROOT_DIR/raze" x -idq -ap "$ARCHIVE_STORE"
-run_expect_exit 2 "$ROOT_DIR/raze" x -idq -n@ "$ARCHIVE_STORE"
-run_expect_exit 2 "$ROOT_DIR/raze" x -idq -x@ "$ARCHIVE_STORE"
+run_expect_exit 2 "$ROOT_DIR/raze" x -idq -n@
+run_expect_exit 2 "$ROOT_DIR/raze" x -idq -x@
 run_expect_exit 2 "$ROOT_DIR/raze" x -idq -n@"$TMP_DIR/does-not-exist.list" "$ARCHIVE_STORE"
 run_expect_exit 2 "$ROOT_DIR/raze" x -idq -ad3 "$ARCHIVE_STORE"
 run_expect_exit 2 "$ROOT_DIR/raze" l -ad1 "$ARCHIVE_STORE"
