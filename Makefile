@@ -75,7 +75,7 @@ SRCS := $(shell find src -type f -name '*.c' | sort)
 OBJS := $(patsubst %.c,$(BUILD_DIR)/%.o,$(SRCS))
 DEPS := $(OBJS:.o=.d)
 
-.PHONY: all clean run deps deps-isa-l check-isal test test-expanded ci-local test-parser-units test-asan-ubsan fuzz-build fuzz-smoke fuzz-soak bench-store bench-compressed bench-solid bench-hot-solid bench-split bench-encrypted bench-expanded bench-external pgo-train pgo-build corpus corpus-fetch corpus-local corpus-themed corpus-expanded
+.PHONY: all clean run deps deps-isa-l check-isal test test-expanded ci-local test-parser-units test-asan-ubsan fuzz-build fuzz-smoke fuzz-soak bench-store bench-compressed bench-solid bench-hot-solid bench-hot-solid-stable bench-split bench-encrypted bench-expanded bench-external pgo-train pgo-build corpus corpus-fetch corpus-local corpus-themed corpus-expanded
 
 all: check-isal $(TARGET)
 
@@ -161,6 +161,9 @@ bench-solid: $(TARGET)
 
 bench-hot-solid: $(TARGET)
 	./bench/bench_hot_solid.sh
+
+bench-hot-solid-stable: $(TARGET)
+	./bench/bench_hot_solid_stable.sh
 
 bench-split: $(TARGET)
 	./bench/bench_split.sh

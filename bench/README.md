@@ -8,7 +8,8 @@ Defaults:
 - `RUNS=7`
 - one warmup run per tool/archive before timed runs
 - reports `p50` and `p90`
-- hard fail gates: `bench-store`, `bench-encrypted`, `bench-external`
+- hard fail gates: `bench-store`, `bench-encrypted`, `bench-external`,
+  `bench-hot-solid-stable`
   (must be <=10% slower by default)
 - warning-only target checks: `bench-compressed`, `bench-solid`,
   `bench-split`, `bench-expanded`, `bench-hot-solid`
@@ -19,6 +20,8 @@ Defaults:
 - `bench-external` writes a dated markdown report to `docs/perf/external/`.
 - `bench-hot-solid` focuses on `enwik8/solid` for faster hot-loop iteration
   and writes a dated markdown report to `docs/perf/hot/`.
+- `bench-hot-solid-stable` repeats hot-solid runs and hard-fails unless all
+  repeated attempts pass at the configured stable gap target.
 
 Run:
 
@@ -27,6 +30,7 @@ make bench-store
 make bench-compressed
 make bench-solid
 make bench-hot-solid
+make bench-hot-solid-stable
 make bench-split
 make bench-encrypted
 make bench-expanded
@@ -41,6 +45,7 @@ UNRAR_THREADS=8 make bench-compressed
 RUNS=11 make bench-hot-solid
 RUNS=11 ENFORCE_GATE=1 TARGET_GAP_PCT=10 make bench-hot-solid
 BENCH_CPU_CORE=2 RUNS=11 make bench-hot-solid
+STABLE_REPEATS=3 STABLE_RUNS=11 STABLE_GAP_PCT=0 BENCH_CPU_CORE=2 make bench-hot-solid-stable
 BENCH_CPU_CORE=2 RUNS=7 TARGET_GAP_PCT=10 make bench-external
 RUNS=3 FORCE_REPACK=1 TARGET_GAP_PCT=15 make bench-external
 ```
