@@ -117,7 +117,11 @@ and strong correctness guarantees.
 - [x] Profile top decode hotspots with representative corpora.
 - [x] Add focused `enwik8/solid` hot-loop benchmark harness
       (`make bench-hot-solid`) with dated reports under `docs/perf/hot/`.
-- [ ] Land low-risk optimizations with no correctness regression.
+- [x] Land low-risk optimizations with no correctness regression
+      (bitreader fast window, slot-table decode, runtime-dispatch copy
+      kernels, and sanitizer/functional gates kept green).
+- [x] Add benchmark reproducibility controls for perf triage
+      (`BENCH_CPU_CORE` support in external/hot benchmark harnesses).
 - [ ] Track and report deltas against `unrar -mt1` per bench family.
 
 ### Packaging and Developer UX
@@ -219,10 +223,12 @@ and strong correctness guarantees.
 
 1. Validate new `x/e/l/lt/t/p` command surface on macOS once hardware/runner
    is available; keep Windows regression coverage in MSYS2.
-2. Close the remaining enwik8 single-file store-path gap against `unrar -mt1`
-   (buffering/chunking hot path work).
-3. Add long-running fuzz execution cadence and bug triage tracking routine.
-4. Keep legacy RAR4-and-below support scoped for post-beta/RC planning
+2. Stabilize and document low-variance perf baselines using pinned benchmark
+   runs (`BENCH_CPU_CORE`) and `RUNS=7` reports under `docs/perf/`.
+3. Track external matrix drift (`store/fast/solid/encrypted`) against
+   `unrar -mt1` and keep the hard gap gate (`TARGET_GAP_PCT=10`) reliable.
+4. Add long-running fuzz execution cadence and bug triage tracking routine.
+5. Keep legacy RAR4-and-below support scoped for post-beta/RC planning
    (separate milestone after stable RAR5 release candidate quality gates).
-5. Revisit self-hosted deep CI only after runner operations are documented
+6. Revisit self-hosted deep CI only after runner operations are documented
    and maintained as a stable, low-friction path.
