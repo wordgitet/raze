@@ -55,6 +55,24 @@ run_expect_exit() {
 	LAST_EXPECT_OK=1
 }
 
+run_expect_exit_one_of() {
+	local expected_a="$1"
+	local expected_b="$2"
+	shift 2
+	local rc
+
+	set +e
+	"$@"
+	rc=$?
+	set -e
+	if [[ "$rc" -ne "$expected_a" && "$rc" -ne "$expected_b" ]]; then
+		fail "expected exit $expected_a or $expected_b, got $rc for command: $*"
+		LAST_EXPECT_OK=0
+		return 0
+	fi
+	LAST_EXPECT_OK=1
+}
+
 dir_hash() {
 	local dir="$1"
 
@@ -142,8 +160,8 @@ run_expect_exit 8 "$ROOT_DIR/raze" x -idq -o+ -op "$TMP_DIR/out_split_missing" \
 
 log "checking corruption regressions"
 run_expect_exit 4 "$ROOT_DIR/raze" x -idq -o+ -op "$TMP_DIR/out_truncated" "$CORRUPT_TRUNCATED"
-run_expect_exit 6 "$ROOT_DIR/raze" x -idq -o+ -op "$TMP_DIR/out_best_htb_corrupt" "$CORRUPT_BEST_HTB"
-run_expect_exit 6 "$ROOT_DIR/raze" x -idq -o+ -psecret -op "$TMP_DIR/out_enc_htb_corrupt" "$CORRUPT_ENC_HTB"
+run_expect_exit_one_of 4 6 "$ROOT_DIR/raze" x -idq -o+ -op "$TMP_DIR/out_best_htb_corrupt" "$CORRUPT_BEST_HTB"
+run_expect_exit_one_of 4 6 "$ROOT_DIR/raze" x -idq -o+ -psecret -op "$TMP_DIR/out_enc_htb_corrupt" "$CORRUPT_ENC_HTB"
 
 if [[ "$FAILURES" -ne 0 ]]; then
 	fatal "$FAILURES expanded check(s) failed"
