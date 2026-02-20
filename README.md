@@ -135,10 +135,12 @@ current `raze` decode path:
   - `RUNS=11 make bench-hot-solid`
   - report path: `docs/perf/hot/YYYY-MM-DD_HHMMSS_hot_solid.md`
   - optional hard fail: `ENFORCE_GATE=1 TARGET_GAP_PCT=10`
+  - optional pinning: `BENCH_CPU_CORE=2 RUNS=11 make bench-hot-solid`
 - External corpus bench is hard-fail by default and writes dated reports:
   - `RUNS=7 make bench-external`
   - report path: `docs/perf/external/YYYY-MM-DD_HHMMSS_external_bench.md`
   - knobs: `FORCE_REPACK=1`, `TARGET_GAP_PCT=<pct>`
+  - optional pinning: `BENCH_CPU_CORE=2 RUNS=7 make bench-external`
 - Optional profile-guided build flow:
   - `make pgo-train` (generates profile data from hot solid + fast extract)
   - `make pgo-build` (rebuilds with `-fprofile-use`)

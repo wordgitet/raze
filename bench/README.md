@@ -40,5 +40,7 @@ RUNS=11 make bench-compressed
 UNRAR_THREADS=8 make bench-compressed
 RUNS=11 make bench-hot-solid
 RUNS=11 ENFORCE_GATE=1 TARGET_GAP_PCT=10 make bench-hot-solid
+BENCH_CPU_CORE=2 RUNS=11 make bench-hot-solid
+BENCH_CPU_CORE=2 RUNS=7 TARGET_GAP_PCT=10 make bench-external
 RUNS=3 FORCE_REPACK=1 TARGET_GAP_PCT=15 make bench-external
 ```
