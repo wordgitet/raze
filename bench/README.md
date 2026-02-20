@@ -11,12 +11,14 @@ Defaults:
 - hard fail gates: `bench-store`, `bench-encrypted`, `bench-external`
   (must be <=10% slower by default)
 - warning-only target checks: `bench-compressed`, `bench-solid`,
-  `bench-split`, `bench-expanded`
+  `bench-split`, `bench-expanded`, `bench-hot-solid`
 - `bench-encrypted` prints both `data-encrypted` and `header-encrypted` results
   before the final pass/fail decision.
 - `bench-external` covers `calgary`, `canterbury`, and `enwik8` across
   `store`, `fast`, `solid`, `encrypted-data`, and `encrypted-headers`.
 - `bench-external` writes a dated markdown report to `docs/perf/external/`.
+- `bench-hot-solid` focuses on `enwik8/solid` for faster hot-loop iteration
+  and writes a dated markdown report to `docs/perf/hot/`.
 
 Run:
 
@@ -24,6 +26,7 @@ Run:
 make bench-store
 make bench-compressed
 make bench-solid
+make bench-hot-solid
 make bench-split
 make bench-encrypted
 make bench-expanded
@@ -35,5 +38,7 @@ Override examples:
 ```sh
 RUNS=11 make bench-compressed
 UNRAR_THREADS=8 make bench-compressed
+RUNS=11 make bench-hot-solid
+RUNS=11 ENFORCE_GATE=1 TARGET_GAP_PCT=10 make bench-hot-solid
 RUNS=3 FORCE_REPACK=1 TARGET_GAP_PCT=15 make bench-external
 ```

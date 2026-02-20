@@ -6,6 +6,7 @@
 #include <string.h>
 
 #include "bit_reader.h"
+#include "copy_kernels.h"
 #include "filter.h"
 
 #define RAZE_RAR5_MAX_LZ_MATCH 0x1001U
@@ -18,6 +19,13 @@
 #define RAZE_RAR5_HUFF_TABLE_SIZEB (RAZE_RAR5_NC + RAZE_RAR5_DCB + RAZE_RAR5_RC + RAZE_RAR5_LDC)
 #define RAZE_RAR5_HUFF_TABLE_SIZEX (RAZE_RAR5_NC + RAZE_RAR5_DCX + RAZE_RAR5_RC + RAZE_RAR5_LDC)
 #define RAZE_RAR5_BC 20U
+#define RAZE_RAR5_LEN_SLOT_MAX 64U
+#define RAZE_RAR5_DIST_SLOT_MAX RAZE_RAR5_DCX
+#if defined(__GNUC__) || defined(__clang__)
+#define RAZE_RAR5_FORCE_INLINE inline __attribute__((always_inline))
+#else
+#define RAZE_RAR5_FORCE_INLINE inline
+#endif
 
 typedef struct RazeRar5BlockHeader {
 	uint32_t block_size;
@@ -27,9 +35,76 @@ typedef struct RazeRar5BlockHeader {
 	int table_present;
 } RazeRar5BlockHeader;
 
-static int read_bits_u32(RazeRar5BitReader *reader, unsigned int bits, uint32_t *value)
+typedef struct RazeRar5SlotTables {
+	uint32_t length_base[RAZE_RAR5_LEN_SLOT_MAX];
+	unsigned char length_bits[RAZE_RAR5_LEN_SLOT_MAX];
+	size_t dist_base[RAZE_RAR5_DIST_SLOT_MAX];
+	unsigned char dist_bits[RAZE_RAR5_DIST_SLOT_MAX];
+} RazeRar5SlotTables;
+
+static const RazeRar5SlotTables *raze_rar5_slot_tables_get(void)
+{
+	static RazeRar5SlotTables tables;
+	static int initialized;
+	uint32_t slot;
+
+	if (initialized) {
+		return &tables;
+	}
+
+	for (slot = 0U; slot < RAZE_RAR5_LEN_SLOT_MAX; ++slot) {
+		uint32_t lbits;
+		uint32_t length;
+
+		if (slot < 8U) {
+			lbits = 0U;
+			length = 2U + slot;
+		} else {
+			lbits = slot / 4U - 1U;
+			length = 2U + ((4U | (slot & 3U)) << lbits);
+		}
+
+		tables.length_bits[slot] = (unsigned char)lbits;
+		tables.length_base[slot] = length;
+	}
+
+	for (slot = 0U; slot < RAZE_RAR5_DIST_SLOT_MAX; ++slot) {
+		unsigned char dbits;
+		size_t base;
+
+		if (slot < 4U) {
+			dbits = 0U;
+			base = 1U + (size_t)slot;
+		} else {
+			dbits = (unsigned char)(slot / 2U - 1U);
+			base = 1U + ((size_t)(2U | (slot & 1U)) << dbits);
+		}
+
+		tables.dist_bits[slot] = dbits;
+		tables.dist_base[slot] = base;
+	}
+
+	initialized = 1;
+	return &tables;
+}
+
+static RAZE_RAR5_FORCE_INLINE int read_bits_u32(
+	RazeRar5BitReader *reader,
+	unsigned int bits,
+	uint32_t *value
+)
 {
 	uint64_t temp;
+
+	if (bits == 0U) {
+		*value = 0U;
+		return 1;
+	}
+	if (bits <= 32U && raze_rar5_br_in_fast64(reader)) {
+		*value = raze_rar5_br_getbits32_fast_unchecked(reader, bits);
+		raze_rar5_br_addbits_fast_unchecked(reader, bits);
+		return 1;
+	}
 
 	if (!raze_rar5_br_read_bits(reader, bits, &temp)) {
 		return 0;
@@ -94,19 +169,23 @@ static int read_filter(RazeRar5BitReader *reader, size_t out_pos, RazeRar5Filter
 	return raze_rar5_filter_queue_push(queue, &op);
 }
 
-static uint32_t slot_to_length(RazeRar5BitReader *reader, uint32_t slot, int *ok)
+static RAZE_RAR5_FORCE_INLINE uint32_t slot_to_length(
+	RazeRar5BitReader *reader,
+	const RazeRar5SlotTables *tables,
+	uint32_t slot,
+	int *ok
+)
 {
 	uint32_t lbits;
-	uint32_t length = 2U;
+	uint32_t length;
 
 	*ok = 0;
-	if (slot < 8U) {
-		lbits = 0U;
-		length += slot;
-	} else {
-		lbits = slot / 4U - 1U;
-		length += (4U | (slot & 3U)) << lbits;
+	if (tables == 0 || slot >= RAZE_RAR5_LEN_SLOT_MAX) {
+		return 0;
 	}
+
+	lbits = tables->length_bits[slot];
+	length = tables->length_base[slot];
 
 	if (lbits > 0U) {
 		uint32_t extra;
@@ -120,7 +199,10 @@ static uint32_t slot_to_length(RazeRar5BitReader *reader, uint32_t slot, int *ok
 	return length;
 }
 
-static void insert_old_dist(size_t old_dist[4], size_t distance)
+static RAZE_RAR5_FORCE_INLINE void insert_old_dist(
+	size_t old_dist[4],
+	size_t distance
+)
 {
 	old_dist[3] = old_dist[2];
 	old_dist[2] = old_dist[1];
@@ -436,35 +518,54 @@ static void copy_history_bytes_unchecked(
 	}
 }
 
-static void copy_from_output_with_overlap(unsigned char *dst, size_t length, size_t distance)
+static inline void copy_match_to_output_no_history(
+	const RazeRar5CopyKernels *kernels,
+	unsigned char *output,
+	size_t *out_pos,
+	size_t length,
+	size_t distance
+)
 {
-	unsigned char *src = dst - distance;
-	size_t copied;
-	size_t remaining;
+	size_t out = *out_pos;
 
-	if (distance == 0U) {
+	if (distance == 0U || distance > out) {
+		memset(output + out, 0, length);
+		*out_pos = out + length;
+		return;
+	}
+	if (distance == 1U) {
+		memset(output + out, output[out - 1U], length);
+		*out_pos = out + length;
+		return;
+	}
+	if (distance == 2U) {
+		kernels->fill_repeat2(
+			output + out,
+			length,
+			output[out - 2U],
+			output[out - 1U]
+		);
+		*out_pos = out + length;
+		return;
+	}
+	if (distance == 4U) {
+		unsigned char p[4];
+
+		p[0] = output[out - 4U];
+		p[1] = output[out - 3U];
+		p[2] = output[out - 2U];
+		p[3] = output[out - 1U];
+		kernels->fill_repeat4(output + out, length, p);
+		*out_pos = out + length;
 		return;
 	}
 
-	if (distance >= length) {
-		memcpy(dst, src, length);
-		return;
-	}
-
-	memcpy(dst, src, distance);
-	copied = distance;
-	remaining = length - copied;
-	while (remaining > copied) {
-		memcpy(dst + copied, dst, copied);
-		remaining -= copied;
-		copied += copied;
-	}
-	if (remaining > 0U) {
-		memcpy(dst + copied, dst, remaining);
-	}
+	kernels->copy_overlap(output + out, length, distance);
+	*out_pos = out + length;
 }
 
 static int copy_match_to_output(
+	const RazeRar5CopyKernels *kernels,
 	RazeRar5UnpackCtx *ctx,
 	unsigned char *output,
 	size_t *out_pos,
@@ -488,18 +589,13 @@ static int copy_match_to_output(
 	 * already-produced output bytes, so skip dict-history branches.
 	 */
 	if (history_filled == 0U) {
-		if (distance == 0U || distance > out) {
-			memset(output + out, 0, length);
-			*out_pos = out + length;
-			return 1;
-		}
-		if (distance == 1U) {
-			memset(output + out, output[out - 1U], length);
-			*out_pos = out + length;
-			return 1;
-		}
-		copy_from_output_with_overlap(output + out, length, distance);
-		*out_pos = out + length;
+		copy_match_to_output_no_history(
+			kernels,
+			output,
+			out_pos,
+			length,
+			distance
+		);
 		return 1;
 	}
 
@@ -530,7 +626,7 @@ static int copy_match_to_output(
 
 	if (distance <= out) {
 		unsigned char *dst = output + out;
-		copy_from_output_with_overlap(dst, length, distance);
+		kernels->copy_overlap(dst, length, distance);
 		*out_pos = out + length;
 		return 1;
 	}
@@ -554,7 +650,7 @@ static int copy_match_to_output(
 			copied = history_bytes;
 		}
 		if (copied < length) {
-			copy_from_output_with_overlap(
+			kernels->copy_overlap(
 				output + out + copied,
 				length - copied,
 				distance
@@ -659,13 +755,18 @@ RazeStatus raze_rar5_unpack_ctx_decode_file(
 	RazeRar5BlockHeader block;
 	RazeRar5FilterQueue filter_queue;
 	size_t out_pos = 0U;
+	int output_only_history;
 	int file_done = 0;
 	int unsupported_filter = 0;
+	const RazeRar5SlotTables *slot_tables;
+	const RazeRar5CopyKernels *copy_kernels;
 	RazeStatus status = RAZE_STATUS_OK;
 
 	if (ctx == 0 || packed == 0 || output == 0) {
 		return RAZE_STATUS_BAD_ARGUMENT;
 	}
+	slot_tables = raze_rar5_slot_tables_get();
+	copy_kernels = raze_rar5_copy_kernels_get();
 
 	if (!solid) {
 		raze_rar5_unpack_ctx_reset_for_new_stream(ctx);
@@ -706,6 +807,7 @@ RazeStatus raze_rar5_unpack_ctx_decode_file(
 		ctx->dict_write_pos = 0U;
 		ctx->dict_filled = 0U;
 	}
+	output_only_history = (ctx->dict_filled == 0U);
 
 	raze_rar5_filter_queue_init(&filter_queue);
 	raze_rar5_br_init(&reader, packed, packed_size);
@@ -756,7 +858,12 @@ RazeStatus raze_rar5_unpack_ctx_decode_file(
 
 			if (main_slot >= 262U) {
 				int ok;
-				uint32_t length = slot_to_length(&reader, main_slot - 262U, &ok);
+				uint32_t length = slot_to_length(
+					&reader,
+					slot_tables,
+					main_slot - 262U,
+					&ok
+				);
 				size_t distance = 1U;
 				uint32_t dist_slot;
 				uint32_t dbits;
@@ -769,14 +876,13 @@ RazeStatus raze_rar5_unpack_ctx_decode_file(
 					status = RAZE_STATUS_BAD_ARCHIVE;
 					goto done;
 				}
-
-				if (dist_slot < 4U) {
-					dbits = 0U;
-					distance += dist_slot;
-				} else {
-					dbits = dist_slot / 2U - 1U;
-					distance += (size_t)(2U | (dist_slot & 1U)) << dbits;
+				if (dist_slot >= RAZE_RAR5_DIST_SLOT_MAX) {
+					status = RAZE_STATUS_BAD_ARCHIVE;
+					goto done;
 				}
+
+				dbits = slot_tables->dist_bits[dist_slot];
+				distance = slot_tables->dist_base[dist_slot];
 
 				if (dbits > 0U) {
 					if (dbits >= 4U) {
@@ -823,7 +929,16 @@ RazeStatus raze_rar5_unpack_ctx_decode_file(
 					status = RAZE_STATUS_BAD_ARCHIVE;
 					goto done;
 				}
-				if (!copy_match_to_output(
+				if (__builtin_expect(output_only_history, 1)) {
+					copy_match_to_output_no_history(
+						copy_kernels,
+						output,
+						&out_pos,
+						length,
+						distance
+					);
+				} else if (!copy_match_to_output(
+						copy_kernels,
 						ctx,
 						output,
 						&out_pos,
@@ -831,8 +946,8 @@ RazeStatus raze_rar5_unpack_ctx_decode_file(
 						length,
 						distance
 					)) {
-					status = RAZE_STATUS_BAD_ARCHIVE;
-					goto done;
+						status = RAZE_STATUS_BAD_ARCHIVE;
+						goto done;
 				}
 				continue;
 			}
@@ -852,7 +967,16 @@ RazeStatus raze_rar5_unpack_ctx_decode_file(
 						status = RAZE_STATUS_BAD_ARCHIVE;
 						goto done;
 					}
-					if (!copy_match_to_output(
+					if (__builtin_expect(output_only_history, 1)) {
+						copy_match_to_output_no_history(
+							copy_kernels,
+							output,
+							&out_pos,
+							ctx->last_length,
+							ctx->old_dist[0]
+						);
+					} else if (!copy_match_to_output(
+							copy_kernels,
 							ctx,
 							output,
 							&out_pos,
@@ -860,8 +984,8 @@ RazeStatus raze_rar5_unpack_ctx_decode_file(
 							ctx->last_length,
 							ctx->old_dist[0]
 						)) {
-						status = RAZE_STATUS_BAD_ARCHIVE;
-						goto done;
+							status = RAZE_STATUS_BAD_ARCHIVE;
+							goto done;
 					}
 				}
 				continue;
@@ -884,7 +1008,7 @@ RazeStatus raze_rar5_unpack_ctx_decode_file(
 					status = RAZE_STATUS_BAD_ARCHIVE;
 					goto done;
 				}
-				length = slot_to_length(&reader, length_slot, &ok);
+				length = slot_to_length(&reader, slot_tables, length_slot, &ok);
 				if (!ok) {
 					status = RAZE_STATUS_BAD_ARCHIVE;
 					goto done;
@@ -895,7 +1019,16 @@ RazeStatus raze_rar5_unpack_ctx_decode_file(
 					status = RAZE_STATUS_BAD_ARCHIVE;
 					goto done;
 				}
-				if (!copy_match_to_output(
+				if (__builtin_expect(output_only_history, 1)) {
+					copy_match_to_output_no_history(
+						copy_kernels,
+						output,
+						&out_pos,
+						length,
+						distance
+					);
+				} else if (!copy_match_to_output(
+						copy_kernels,
 						ctx,
 						output,
 						&out_pos,
@@ -903,8 +1036,8 @@ RazeStatus raze_rar5_unpack_ctx_decode_file(
 						length,
 						distance
 					)) {
-					status = RAZE_STATUS_BAD_ARCHIVE;
-					goto done;
+						status = RAZE_STATUS_BAD_ARCHIVE;
+						goto done;
 				}
 				continue;
 			}

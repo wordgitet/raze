@@ -7,6 +7,8 @@ RUN_SECS ?= 30
 SOAK_SECS ?= 300
 CI_LOCAL_EXPANDED ?= 0
 ENABLE_LTO ?= 1
+PGO_PROFILE_DIR ?= $(BUILD_DIR)/pgo-profile
+PGO_TRAIN_RUNS ?= 3
 
 BASE_CFLAGS := -std=c11 -O3 -fno-semantic-interposition \
 	-Wall -Wextra -Wpedantic -MMD -MP -Iinclude
@@ -73,7 +75,7 @@ SRCS := $(shell find src -type f -name '*.c' | sort)
 OBJS := $(patsubst %.c,$(BUILD_DIR)/%.o,$(SRCS))
 DEPS := $(OBJS:.o=.d)
 
-.PHONY: all clean run deps deps-isa-l check-isal test test-expanded ci-local test-parser-units test-asan-ubsan fuzz-build fuzz-smoke fuzz-soak bench-store bench-compressed bench-solid bench-split bench-encrypted bench-expanded bench-external corpus corpus-fetch corpus-local corpus-themed corpus-expanded
+.PHONY: all clean run deps deps-isa-l check-isal test test-expanded ci-local test-parser-units test-asan-ubsan fuzz-build fuzz-smoke fuzz-soak bench-store bench-compressed bench-solid bench-hot-solid bench-split bench-encrypted bench-expanded bench-external pgo-train pgo-build corpus corpus-fetch corpus-local corpus-themed corpus-expanded
 
 all: check-isal $(TARGET)
 
@@ -157,6 +159,9 @@ bench-compressed: $(TARGET)
 bench-solid: $(TARGET)
 	./bench/bench_solid.sh
 
+bench-hot-solid: $(TARGET)
+	./bench/bench_hot_solid.sh
+
 bench-split: $(TARGET)
 	./bench/bench_split.sh
 
@@ -168,6 +173,45 @@ bench-expanded: $(TARGET)
 
 bench-external: $(TARGET)
 	./bench/bench_external.sh
+
+pgo-train:
+	rm -rf "$(PGO_PROFILE_DIR)"
+	$(MAKE) clean
+	$(MAKE) ENABLE_LTO=0 \
+		EXTRA_CFLAGS="$(EXTRA_CFLAGS) -fprofile-generate=$(PGO_PROFILE_DIR)" \
+		EXTRA_LDFLAGS="$(EXTRA_LDFLAGS) -fprofile-generate=$(PGO_PROFILE_DIR)"
+	@mkdir -p "$(PGO_PROFILE_DIR)"
+	@./scripts/corpus_fetch.sh >/dev/null
+	@./scripts/corpus_build_local.sh >/dev/null
+	@if [ ! -f corpus/local/external/archives/enwik8_solid.rar ]; then \
+		if command -v rar >/dev/null 2>&1; then \
+			mkdir -p corpus/local/external/archives; \
+			( cd corpus/upstream/enwik8 && \
+			  rar a -idq -ma5 -m5 -s \
+			  "$(CURDIR)/corpus/local/external/archives/enwik8_solid.rar" . ); \
+		else \
+			echo "pgo-train: enwik8_solid.rar missing and rar not found; skipping enwik8 training"; \
+		fi; \
+	fi
+	@if [ -f corpus/local/external/archives/enwik8_solid.rar ]; then \
+		for _ in $$(seq 1 "$(PGO_TRAIN_RUNS)"); do \
+			rm -rf build/pgo_train_enwik8; \
+			./raze x -idq -o+ -opbuild/pgo_train_enwik8 \
+				corpus/local/external/archives/enwik8_solid.rar >/dev/null; \
+		done; \
+	fi
+	@for _ in $$(seq 1 "$(PGO_TRAIN_RUNS)"); do \
+		rm -rf build/pgo_train_fast; \
+		./raze x -idq -o+ -opbuild/pgo_train_fast \
+			corpus/local/archives/local_fast.rar >/dev/null; \
+	done
+	@echo "pgo-train: profile data generated in $(PGO_PROFILE_DIR)"
+
+pgo-build:
+	$(MAKE) clean
+	$(MAKE) ENABLE_LTO=0 \
+		EXTRA_CFLAGS="$(EXTRA_CFLAGS) -fprofile-use=$(PGO_PROFILE_DIR) -fprofile-correction -Wno-missing-profile" \
+		EXTRA_LDFLAGS="$(EXTRA_LDFLAGS) -fprofile-use=$(PGO_PROFILE_DIR)"
 
 corpus-fetch:
 	./scripts/corpus_fetch.sh
@@ -198,7 +242,7 @@ $(FUZZ_BUILD_DIR)/fuzz_block_reader: tests/fuzz/fuzz_block_reader.c src/format/r
 $(FUZZ_BUILD_DIR)/fuzz_file_header: tests/fuzz/fuzz_file_header.c src/format/rar5/file_header.c src/format/rar5/vint.c | $(FUZZ_BUILD_DIR)
 	$(FUZZ_CC) $(FUZZ_CFLAGS) $^ -o $@ $(FUZZ_LDFLAGS)
 
-$(FUZZ_BUILD_DIR)/fuzz_unpack_v50: tests/fuzz/fuzz_unpack_v50.c src/decode/rar5/unpack_v50.c src/decode/rar5/bit_reader.c src/decode/rar5/huff.c src/decode/rar5/filter.c src/decode/rar5/window.c | $(FUZZ_BUILD_DIR)
+$(FUZZ_BUILD_DIR)/fuzz_unpack_v50: tests/fuzz/fuzz_unpack_v50.c src/decode/rar5/unpack_v50.c src/decode/rar5/bit_reader.c src/decode/rar5/huff.c src/decode/rar5/filter.c src/decode/rar5/window.c src/decode/rar5/copy_kernels.c src/platform/cpu_features.c | $(FUZZ_BUILD_DIR)
 	$(FUZZ_CC) $(FUZZ_CFLAGS) $^ -o $@ $(FUZZ_LDFLAGS)
 
 -include $(DEPS)

@@ -113,10 +113,13 @@ make ci-local CI_LOCAL_EXPANDED=1 RUN_SECS=30
 make bench-store
 make bench-compressed
 make bench-solid
+make bench-hot-solid
 make bench-split
 make bench-encrypted
 make bench-expanded
 make bench-external
+make pgo-train
+make pgo-build
 ```
 
 Bench scripts pin UnRAR to single-thread by default for fair comparison with
@@ -128,10 +131,17 @@ current `raze` decode path:
 - Override example: `RUNS=11 make bench-solid`
 - Optional deterministic pinning: `BENCH_CPU_CORE=2 make bench-compressed`
 - Compressed and solid benches perform one warmup run and report `p50`/`p90`.
+- Hot decode-loop benchmark for quick iteration:
+  - `RUNS=11 make bench-hot-solid`
+  - report path: `docs/perf/hot/YYYY-MM-DD_HHMMSS_hot_solid.md`
+  - optional hard fail: `ENFORCE_GATE=1 TARGET_GAP_PCT=10`
 - External corpus bench is hard-fail by default and writes dated reports:
   - `RUNS=7 make bench-external`
   - report path: `docs/perf/external/YYYY-MM-DD_HHMMSS_external_bench.md`
   - knobs: `FORCE_REPACK=1`, `TARGET_GAP_PCT=<pct>`
+- Optional profile-guided build flow:
+  - `make pgo-train` (generates profile data from hot solid + fast extract)
+  - `make pgo-build` (rebuilds with `-fprofile-use`)
 - Fuzz smoke runs use temporary corpus copies, so repository seed corpora stay
   unchanged.
 - Fuzz soak runs keep artifacts under `build/fuzz-soak/<timestamp>/` for

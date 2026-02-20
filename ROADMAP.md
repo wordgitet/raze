@@ -114,7 +114,9 @@ and strong correctness guarantees.
 
 ### Performance
 
-- [ ] Profile top decode hotspots with representative corpora.
+- [x] Profile top decode hotspots with representative corpora.
+- [x] Add focused `enwik8/solid` hot-loop benchmark harness
+      (`make bench-hot-solid`) with dated reports under `docs/perf/hot/`.
 - [ ] Land low-risk optimizations with no correctness regression.
 - [ ] Track and report deltas against `unrar -mt1` per bench family.
 

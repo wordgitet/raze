@@ -6,7 +6,7 @@
 
 #include "bit_reader.h"
 
-#define RAZE_RAR5_MAX_QUICK_DECODE_BITS 9U
+#define RAZE_RAR5_MAX_QUICK_DECODE_BITS 10U
 #define RAZE_RAR5_LARGEST_TABLE_SIZE 306U
 
 typedef struct RazeRar5DecodeTable {
@@ -25,69 +25,6 @@ void raze_rar5_make_decode_tables(
 	uint32_t size
 );
 
-static inline int raze_rar5_br_fast_add_bits(
-	RazeRar5BitReader *reader,
-	unsigned int bits
-)
-{
-	size_t next_byte_pos;
-	size_t bytes_left;
-	size_t bits_left;
-	unsigned int next_bit_pos;
-
-	if (reader == 0) {
-		return 0;
-	}
-
-	if (reader->byte_pos == reader->data_size && bits != 0U) {
-		return 0;
-	}
-
-	next_byte_pos = reader->byte_pos;
-	next_bit_pos = reader->bit_pos;
-	bytes_left = reader->data_size - next_byte_pos;
-	if (bytes_left > (SIZE_MAX >> 3U)) {
-		return 0;
-	}
-	bits_left = (bytes_left << 3U) - next_bit_pos;
-	if ((size_t)bits > bits_left) {
-		return 0;
-	}
-
-	next_bit_pos += bits;
-	next_byte_pos += (size_t)(next_bit_pos >> 3U);
-	next_bit_pos &= 7U;
-
-	reader->byte_pos = next_byte_pos;
-	reader->bit_pos = next_bit_pos;
-	return 1;
-}
-
-static inline uint16_t raze_rar5_br_fast_peek16(const RazeRar5BitReader *reader)
-{
-	uint32_t bit_field;
-	unsigned int shift;
-	const unsigned char *p;
-
-	if (reader == 0) {
-		return 0;
-	}
-	if (__builtin_expect(reader->bit_pos > 7U ||
-		reader->byte_pos >= reader->data_size ||
-		reader->data_size - reader->byte_pos < 3U, 0)) {
-		/* Fall back to the checked slow path near buffer tail. */
-		return raze_rar5_br_peek16(reader);
-	}
-
-	p = reader->data + reader->byte_pos;
-	bit_field = ((uint32_t)p[0] << 16U) |
-		    ((uint32_t)p[1] << 8U) |
-		    (uint32_t)p[2];
-	shift = 8U - reader->bit_pos;
-	bit_field >>= shift;
-	return (uint16_t)(bit_field & 0xffffU);
-}
-
 static inline int raze_rar5_decode_number(
 	RazeRar5BitReader *reader,
 	RazeRar5DecodeTable *dec,
@@ -105,10 +42,39 @@ static inline int raze_rar5_decode_number(
 	}
 
 	quick_bits = dec->quick_bits;
-	bit_field = (uint32_t)(raze_rar5_br_fast_peek16(reader) & 0xfffeU);
+
+	if (__builtin_expect(raze_rar5_br_in_fast16(reader), 1)) {
+		bit_field = (uint32_t)(raze_rar5_br_peek16_fast_unchecked(reader) &
+				       0xfffeU);
+		if (__builtin_expect(bit_field < dec->decode_len[quick_bits], 1)) {
+			uint32_t code = bit_field >> (16U - quick_bits);
+
+			raze_rar5_br_addbits_fast_unchecked(reader,
+							    dec->quick_len[code]);
+			*number = dec->quick_num[code];
+			return 1;
+		}
+
+		bits = quick_bits + 1U;
+		while (bits < 15U && bit_field >= dec->decode_len[bits]) {
+			++bits;
+		}
+
+		raze_rar5_br_addbits_fast_unchecked(reader, bits);
+		dist = bit_field - dec->decode_len[bits - 1U];
+		dist >>= (16U - bits);
+		pos = dec->decode_pos[bits] + dist;
+		if (pos >= dec->max_num) {
+			pos = 0U;
+		}
+		*number = dec->decode_num[pos];
+		return 1;
+	}
+
+	bit_field = (uint32_t)(raze_rar5_br_peek16(reader) & 0xfffeU);
 	if (__builtin_expect(bit_field < dec->decode_len[quick_bits], 1)) {
 		uint32_t code = bit_field >> (16U - quick_bits);
-		if (!raze_rar5_br_fast_add_bits(reader, dec->quick_len[code])) {
+		if (!raze_rar5_br_add_bits(reader, dec->quick_len[code])) {
 			return 0;
 		}
 		*number = dec->quick_num[code];
@@ -120,7 +86,7 @@ static inline int raze_rar5_decode_number(
 		++bits;
 	}
 
-	if (!raze_rar5_br_fast_add_bits(reader, bits)) {
+	if (!raze_rar5_br_add_bits(reader, bits)) {
 		return 0;
 	}
 
@@ -128,7 +94,7 @@ static inline int raze_rar5_decode_number(
 	dist >>= (16U - bits);
 	pos = dec->decode_pos[bits] + dist;
 	if (pos >= dec->max_num) {
-		pos = 0;
+		pos = 0U;
 	}
 	*number = dec->decode_num[pos];
 	return 1;

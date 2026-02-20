@@ -47,6 +47,8 @@ void raze_rar5_br_init(
 	reader->data_size = data_size;
 	reader->byte_pos = 0;
 	reader->bit_pos = 0;
+	reader->fast16_end = data_size >= 3U ? data_size - 3U : 0U;
+	reader->fast64_end = data_size >= 8U ? data_size - 8U : 0U;
 }
 
 size_t raze_rar5_br_bit_offset(const RazeRar5BitReader *reader) {
@@ -111,6 +113,11 @@ int raze_rar5_br_read_bits(
 		*value = 0;
 		return 1;
 	}
+	if (raze_rar5_br_in_fast64(reader)) {
+		*value = raze_rar5_br_getbits64_fast_unchecked(reader, bits);
+		raze_rar5_br_addbits_fast_unchecked(reader, bits);
+		return 1;
+	}
 	if (reader->data == 0 || reader->bit_pos > 7U ||
 	    reader->byte_pos > reader->data_size) {
 		return 0;
@@ -137,6 +144,9 @@ uint16_t raze_rar5_br_peek16(const RazeRar5BitReader *reader) {
 	if (reader->data == 0 || reader->bit_pos > 7U ||
 	    reader->byte_pos > reader->data_size) {
 		return 0;
+	}
+	if (raze_rar5_br_in_fast16(reader)) {
+		return raze_rar5_br_peek16_fast_unchecked(reader);
 	}
 	avail = reader->data_size - reader->byte_pos;
 	if (avail == 0U) {
