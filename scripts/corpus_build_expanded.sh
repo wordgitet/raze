@@ -26,6 +26,28 @@ have_cmd() {
 	command -v "$1" >/dev/null 2>&1
 }
 
+is_windows_shell() {
+	case "$(uname -s)" in
+	MINGW*|MSYS*|CYGWIN*)
+		return 0
+		;;
+	*)
+		return 1
+		;;
+	esac
+}
+
+max_relative_file_path_len() {
+	local root="$1"
+	local max_len
+
+	max_len="$(find "$root" -type f | sed "s#^$root/##" | awk '
+		{ n = length($0); if (n > max) max = n }
+		END { print max + 0 }
+	')"
+	printf '%s\n' "$max_len"
+}
+
 RAR_BIN="${RAR_BIN:-$("$ROOT_DIR"/scripts/find_rar.sh || true)}"
 if [[ -z "$RAR_BIN" ]]; then
 	die "rar binary not found. Set RAR_BIN or install rar."
@@ -171,9 +193,23 @@ create_path_stress_fixture() {
 	local dir="$root"
 	local i
 	local file_path
+	local max_rel_path
+
+	if is_windows_shell; then
+		# Keep Windows path stress practical for Win32 API limits.
+		depth=6
+	fi
 
 	if [[ -d "$root" ]] && find "$root" -type f -print -quit | grep -q .; then
-		return
+		if is_windows_shell; then
+			max_rel_path="$(max_relative_file_path_len "$root")"
+			if [[ "$max_rel_path" -le 180 ]]; then
+				return 0
+			fi
+			log "rebuilding path-stress fixture for windows-safe depth"
+		else
+			return 0
+		fi
 	fi
 
 	log "creating path-stress fixture"

@@ -25,9 +25,17 @@ log() {
 	printf '[test-expanded] %s\n' "$*"
 }
 
-fail() {
+FAILURES=0
+LAST_EXPECT_OK=1
+
+fatal() {
 	printf '[test-expanded] error: %s\n' "$*" >&2
 	exit 1
+}
+
+fail() {
+	printf '[test-expanded] error: %s\n' "$*" >&2
+	FAILURES=$((FAILURES + 1))
 }
 
 run_expect_exit() {
@@ -41,7 +49,10 @@ run_expect_exit() {
 	set -e
 	if [[ "$rc" -ne "$expected" ]]; then
 		fail "expected exit $expected, got $rc for command: $*"
+		LAST_EXPECT_OK=0
+		return 0
 	fi
+	LAST_EXPECT_OK=1
 }
 
 dir_hash() {
@@ -61,6 +72,9 @@ extract_and_compare_hash() {
 
 	log "extracting $label"
 	run_expect_exit 0 "$ROOT_DIR/raze" x -idq -o+ "$@" -op "$out_dir" "$archive"
+	if [[ "$LAST_EXPECT_OK" -ne 1 ]]; then
+		return
+	fi
 	if [[ "$SOURCE_HASH" != "$(dir_hash "$out_dir")" ]]; then
 		fail "$label extraction hash mismatch"
 	fi
@@ -69,22 +83,22 @@ extract_and_compare_hash() {
 log "ensuring expanded corpus exists"
 "$ROOT_DIR/scripts/corpus_build_expanded.sh"
 
-[[ -d "$SOURCE_DIR" ]] || fail "missing $SOURCE_DIR"
-[[ -f "$ARCHIVE_STORE" ]] || fail "missing $ARCHIVE_STORE"
-[[ -f "$ARCHIVE_FAST" ]] || fail "missing $ARCHIVE_FAST"
-[[ -f "$ARCHIVE_SOLID" ]] || fail "missing $ARCHIVE_SOLID"
-[[ -f "$ARCHIVE_FAST_HTB" ]] || fail "missing $ARCHIVE_FAST_HTB"
-[[ -f "$ARCHIVE_BEST_HTB" ]] || fail "missing $ARCHIVE_BEST_HTB"
-[[ -f "$ARCHIVE_ENC" ]] || fail "missing $ARCHIVE_ENC"
-[[ -f "$ARCHIVE_HENC" ]] || fail "missing $ARCHIVE_HENC"
-[[ -f "$CORRUPT_TRUNCATED" ]] || fail "missing $CORRUPT_TRUNCATED"
-[[ -f "$CORRUPT_BEST_HTB" ]] || fail "missing $CORRUPT_BEST_HTB"
-[[ -f "$CORRUPT_ENC_HTB" ]] || fail "missing $CORRUPT_ENC_HTB"
+[[ -d "$SOURCE_DIR" ]] || fatal "missing $SOURCE_DIR"
+[[ -f "$ARCHIVE_STORE" ]] || fatal "missing $ARCHIVE_STORE"
+[[ -f "$ARCHIVE_FAST" ]] || fatal "missing $ARCHIVE_FAST"
+[[ -f "$ARCHIVE_SOLID" ]] || fatal "missing $ARCHIVE_SOLID"
+[[ -f "$ARCHIVE_FAST_HTB" ]] || fatal "missing $ARCHIVE_FAST_HTB"
+[[ -f "$ARCHIVE_BEST_HTB" ]] || fatal "missing $ARCHIVE_BEST_HTB"
+[[ -f "$ARCHIVE_ENC" ]] || fatal "missing $ARCHIVE_ENC"
+[[ -f "$ARCHIVE_HENC" ]] || fatal "missing $ARCHIVE_HENC"
+[[ -f "$CORRUPT_TRUNCATED" ]] || fatal "missing $CORRUPT_TRUNCATED"
+[[ -f "$CORRUPT_BEST_HTB" ]] || fatal "missing $CORRUPT_BEST_HTB"
+[[ -f "$CORRUPT_ENC_HTB" ]] || fatal "missing $CORRUPT_ENC_HTB"
 
 ARCHIVE_FAST_SPLIT_P1="$(find "$ARCHIVE_DIR" -maxdepth 1 -type f -name 'expanded_fast_split*.part01.rar' | sort | head -n 1)"
 ARCHIVE_SOLID_SPLIT_P1="$(find "$ARCHIVE_DIR" -maxdepth 1 -type f -name 'expanded_best_solid_split*.part01.rar' | sort | head -n 1)"
-[[ -n "$ARCHIVE_FAST_SPLIT_P1" && -f "$ARCHIVE_FAST_SPLIT_P1" ]] || fail "missing expanded fast split part01 archive"
-[[ -n "$ARCHIVE_SOLID_SPLIT_P1" && -f "$ARCHIVE_SOLID_SPLIT_P1" ]] || fail "missing expanded solid split part01 archive"
+[[ -n "$ARCHIVE_FAST_SPLIT_P1" && -f "$ARCHIVE_FAST_SPLIT_P1" ]] || fatal "missing expanded fast split part01 archive"
+[[ -n "$ARCHIVE_SOLID_SPLIT_P1" && -f "$ARCHIVE_SOLID_SPLIT_P1" ]] || fatal "missing expanded solid split part01 archive"
 
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
@@ -104,11 +118,13 @@ log "checking BLAKE integrity + technical list metadata"
 extract_and_compare_hash "expanded_fast_htb" "$ARCHIVE_FAST_HTB" "$TMP_DIR/out_fast_htb"
 extract_and_compare_hash "expanded_best_htb" "$ARCHIVE_BEST_HTB" "$TMP_DIR/out_best_htb"
 run_expect_exit 0 "$ROOT_DIR/raze" lt "$ARCHIVE_FAST_HTB" > "$TMP_DIR/list_fast_htb.txt"
-if ! grep -Fq "hash_type=blake2sp" "$TMP_DIR/list_fast_htb.txt"; then
+if [[ "$LAST_EXPECT_OK" -eq 1 ]] &&
+   ! grep -Fq "hash_type=blake2sp" "$TMP_DIR/list_fast_htb.txt"; then
 	fail "technical list missing blake2sp for expanded_fast_htb"
 fi
 run_expect_exit 0 "$ROOT_DIR/raze" lt "$ARCHIVE_BEST_HTB" > "$TMP_DIR/list_best_htb.txt"
-if ! grep -Fq "hash_type=blake2sp" "$TMP_DIR/list_best_htb.txt"; then
+if [[ "$LAST_EXPECT_OK" -eq 1 ]] &&
+   ! grep -Fq "hash_type=blake2sp" "$TMP_DIR/list_best_htb.txt"; then
 	fail "technical list missing blake2sp for expanded_best_htb"
 fi
 
@@ -128,5 +144,9 @@ log "checking corruption regressions"
 run_expect_exit 4 "$ROOT_DIR/raze" x -idq -o+ -op "$TMP_DIR/out_truncated" "$CORRUPT_TRUNCATED"
 run_expect_exit 6 "$ROOT_DIR/raze" x -idq -o+ -op "$TMP_DIR/out_best_htb_corrupt" "$CORRUPT_BEST_HTB"
 run_expect_exit 6 "$ROOT_DIR/raze" x -idq -o+ -psecret -op "$TMP_DIR/out_enc_htb_corrupt" "$CORRUPT_ENC_HTB"
+
+if [[ "$FAILURES" -ne 0 ]]; then
+	fatal "$FAILURES expanded check(s) failed"
+fi
 
 log "all expanded corpus checks passed"
