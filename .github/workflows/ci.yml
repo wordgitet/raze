@@ -22,15 +22,15 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Build
-        run: make -j"$(nproc)"
+        run: make USE_ISAL=0 -j"$(nproc)"
 
       - name: Run tests (rar-aware gate)
         run: |
           if command -v rar >/dev/null 2>&1; then
-            make test
+            make USE_ISAL=0 test
           else
             echo "::notice::rar not found; running parser unit gate only"
-            make test-parser-units
+            make USE_ISAL=0 test-parser-units
           fi
 
       - name: CLI smoke
