@@ -177,8 +177,9 @@ and strong correctness guarantees.
 ### RC Entry Gate
 
 - [ ] Beta exit criteria satisfied for the supported RAR5 scope.
-- [ ] Required cloud CI (`build-and-test`) and self-hosted full-tests
-      (`full-test-gate`) both green on latest `master`.
+- [ ] Required cloud CI (`build-and-test`) is green on latest `master`.
+- [ ] Local deep gate is green on latest `master`:
+      `make ci-local CI_LOCAL_EXPANDED=1 RUN_SECS=30`.
 - [ ] No open high-severity correctness/security issues in release scope.
 
 ### Freeze Policy
@@ -193,7 +194,7 @@ and strong correctness guarantees.
 
 - [ ] Run full local gate on release branch:
       `make ci-local CI_LOCAL_EXPANDED=1 RUN_SECS=30`.
-- [ ] Run cloud fast CI and self-hosted full-tests on release branch.
+- [ ] Run cloud fast CI (`build-and-test`) on release branch.
 - [ ] Re-run benchmark suite and compare against recorded baseline.
 - [ ] Verify docs/release notes match shipped behavior and limits.
 - [ ] Validate install/build/test instructions from clean checkout.
@@ -207,7 +208,7 @@ and strong correctness guarantees.
 ### RC Exit Criteria (Go/No-Go to Stable)
 
 - [ ] Zero open release-blocker issues.
-- [ ] CI stability confirmed over repeated runs (cloud + self-hosted).
+- [ ] CI stability confirmed over repeated runs (cloud + local deep gate).
 - [ ] No high-severity regressions vs baseline performance/correctness.
 - [ ] Final stable tag plan approved and checklist complete.
 
@@ -219,3 +220,5 @@ and strong correctness guarantees.
 3. Add long-running fuzz execution cadence and bug triage tracking routine.
 4. Keep legacy RAR4-and-below support scoped for post-beta/RC planning
    (separate milestone after stable RAR5 release candidate quality gates).
+5. Revisit self-hosted deep CI only after runner operations are documented
+   and maintained as a stable, low-friction path.
