@@ -116,6 +116,7 @@ make bench-solid
 make bench-split
 make bench-encrypted
 make bench-expanded
+make bench-external
 ```
 
 Bench scripts pin UnRAR to single-thread by default for fair comparison with
@@ -127,6 +128,10 @@ current `raze` decode path:
 - Override example: `RUNS=11 make bench-solid`
 - Optional deterministic pinning: `BENCH_CPU_CORE=2 make bench-compressed`
 - Compressed and solid benches perform one warmup run and report `p50`/`p90`.
+- External corpus bench is hard-fail by default and writes dated reports:
+  - `RUNS=7 make bench-external`
+  - report path: `docs/perf/external/YYYY-MM-DD_HHMMSS_external_bench.md`
+  - knobs: `FORCE_REPACK=1`, `TARGET_GAP_PCT=<pct>`
 - Fuzz smoke runs use temporary corpus copies, so repository seed corpora stay
   unchanged.
 - Fuzz soak runs keep artifacts under `build/fuzz-soak/<timestamp>/` for

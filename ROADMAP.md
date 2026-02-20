@@ -99,8 +99,9 @@ and strong correctness guarantees.
 
 - [x] Expand local corpus coverage with expanded stress/adversarial fixtures
       and dedicated local gates (`make test-expanded`, `make bench-expanded`).
-- [ ] Expand external corpus coverage (calgary/canterbury/enwik8) beyond
-      optional/manual runs.
+- [x] Expand external corpus coverage (calgary/canterbury/enwik8) with
+      tracked benchmark harness (`make bench-external`), all-mode matrix,
+      hard-fail default gates, and dated reports under `docs/perf/external/`.
 - [ ] Add regression tests for every fixed bug class (no silent reopenings).
 - [x] Add switch edge-case regressions for beta CLI surface (`-ap`,
       `-n@`, `-x@`, `-ad1`, `-ad2`) including deterministic usage errors.
@@ -216,7 +217,8 @@ and strong correctness guarantees.
 
 1. Validate new `x/e/l/lt/t/p` command surface on macOS once hardware/runner
    is available; keep Windows regression coverage in MSYS2.
-2. Expand external corpus coverage from optional/manual to a tracked profile.
+2. Close the remaining enwik8 single-file store-path gap against `unrar -mt1`
+   (buffering/chunking hot path work).
 3. Add long-running fuzz execution cadence and bug triage tracking routine.
 4. Keep legacy RAR4-and-below support scoped for post-beta/RC planning
    (separate milestone after stable RAR5 release candidate quality gates).
