@@ -41,6 +41,9 @@
 #define RAZE_RAR5_HFL_EXTRA 0x0001U
 #define RAZE_RAR5_HFL_DATA 0x0002U
 #define RAZE_RAR5_MAX_HEADER_SIZE (2U * 1024U * 1024U)
+#define RAZE_STORE_COPY_CHUNK_SIZE (4U << 20)
+#define RAZE_STORE_COPY_CHUNK_FALLBACK (1U << 18)
+#define RAZE_STREAM_IO_BUFFER_SIZE (4U << 20)
 
 typedef struct PendingDirMeta {
     char *path;
@@ -230,6 +233,34 @@ static int current_file_offset(FILE *file, uint64_t *offset) {
 
     *offset = (uint64_t)(unsigned long)pos;
     return 1;
+}
+
+static int configure_stream_io_buffer(
+	FILE *stream,
+	unsigned char **owned_buffer
+)
+{
+	unsigned char *buffer;
+
+	if (stream == 0) {
+		return 0;
+	}
+	if (owned_buffer == 0) {
+		return 0;
+	}
+	*owned_buffer = 0;
+
+	buffer = (unsigned char *)malloc(RAZE_STREAM_IO_BUFFER_SIZE);
+	if (buffer == 0) {
+		return 0;
+	}
+	if (setvbuf(stream, (char *)buffer, _IOFBF,
+		    RAZE_STREAM_IO_BUFFER_SIZE) != 0) {
+		free(buffer);
+		return 0;
+	}
+	*owned_buffer = buffer;
+	return 1;
 }
 
 static RazeStatus parse_head_crypt(
@@ -1054,25 +1085,37 @@ static RazeStatus copy_store_payload(
     int use_hash_key,
     const unsigned char *hash_key
 ) {
-    unsigned char buf[1U << 16];
     uint64_t remaining = size;
     uint32_t crc = raze_crc32_init();
     RazeBlake2spState blake_state;
     unsigned char actual_hash[RAZE_BLAKE2SP_DIGEST_SIZE];
     unsigned char mac_hash[RAZE_BLAKE2SP_DIGEST_SIZE];
     const unsigned char *compare_hash = actual_hash;
+    unsigned char *buf = 0;
+    size_t chunk_size = RAZE_STORE_COPY_CHUNK_SIZE;
+    RazeStatus status = RAZE_STATUS_OK;
 
     memset(actual_hash, 0, sizeof(actual_hash));
     memset(mac_hash, 0, sizeof(mac_hash));
+    buf = (unsigned char *)malloc(chunk_size);
+    if (buf == 0) {
+        chunk_size = RAZE_STORE_COPY_CHUNK_FALLBACK;
+        buf = (unsigned char *)malloc(chunk_size);
+        if (buf == 0) {
+            return RAZE_STATUS_IO;
+        }
+    }
+
     if (hash_present) {
         if (hash_type != RAZE_RAR5_HASH_TYPE_BLAKE2SP) {
-            return RAZE_STATUS_UNSUPPORTED_FEATURE;
+            status = RAZE_STATUS_UNSUPPORTED_FEATURE;
+            goto cleanup;
         }
         raze_blake2sp_init(&blake_state);
     }
 
     while (remaining > 0) {
-        size_t want = sizeof(buf);
+        size_t want = chunk_size;
         size_t nread;
         size_t nwritten;
 
@@ -1083,15 +1126,18 @@ static RazeStatus copy_store_payload(
         nread = fread(buf, 1, want, archive);
         if (nread == 0) {
             if (feof(archive)) {
-                return RAZE_STATUS_BAD_ARCHIVE;
+                status = RAZE_STATUS_BAD_ARCHIVE;
+            } else {
+                status = RAZE_STATUS_IO;
             }
-            return RAZE_STATUS_IO;
+            goto cleanup;
         }
 
         if (output != 0) {
             nwritten = fwrite(buf, 1, nread, output);
             if (nwritten != nread) {
-                return RAZE_STATUS_IO;
+                status = RAZE_STATUS_IO;
+                goto cleanup;
             }
         }
 
@@ -1105,23 +1151,28 @@ static RazeStatus copy_store_payload(
     if (crc32_present) {
         uint32_t actual = raze_crc32_final(crc);
         if (actual != expected_crc32) {
-            return RAZE_STATUS_CRC_MISMATCH;
+            status = RAZE_STATUS_CRC_MISMATCH;
+            goto cleanup;
         }
     }
     if (hash_present) {
         raze_blake2sp_final(&blake_state, actual_hash);
         if (use_hash_key) {
             if (!raze_rar5_digest_to_mac(actual_hash, hash_key, mac_hash)) {
-                return RAZE_STATUS_UNSUPPORTED_FEATURE;
+                status = RAZE_STATUS_UNSUPPORTED_FEATURE;
+                goto cleanup;
             }
             compare_hash = mac_hash;
         }
         if (memcmp(compare_hash, expected_hash, RAZE_BLAKE2SP_DIGEST_SIZE) != 0) {
-            return RAZE_STATUS_CRC_MISMATCH;
+            status = RAZE_STATUS_CRC_MISMATCH;
+            goto cleanup;
         }
     }
 
-    return RAZE_STATUS_OK;
+cleanup:
+    free(buf);
+    return status;
 }
 
 static RazeStatus decode_payload(
@@ -1186,6 +1237,7 @@ static RazeStatus extract_file_entry(
     char out_path[4096];
     char entry_rel[4096];
     FILE *output = 0;
+    unsigned char *output_stream_buf = 0;
     RazeStatus status;
     int remove_output = 0;
     int solid_stream;
@@ -1356,6 +1408,14 @@ static RazeStatus extract_file_entry(
         raze_diag_set("cannot create output file '%s': %s", out_path, strerror(errno));
         return RAZE_STATUS_IO;
     }
+    if (fh->method == 0 && !fh->encrypted) {
+        /* Store entries are copied in large chunks already; avoid an extra
+         * stdio buffering copy on the hot write path.
+         */
+        (void)setvbuf(output, 0, _IONBF, 0);
+    } else {
+        (void)configure_stream_io_buffer(output, &output_stream_buf);
+    }
 
     status = decode_payload(
         payload_stream,
@@ -1371,6 +1431,8 @@ static RazeStatus extract_file_entry(
         status = RAZE_STATUS_IO;
     }
     output = 0;
+    free(output_stream_buf);
+    output_stream_buf = 0;
 
     if (status == RAZE_STATUS_OK) {
         apply_entry_metadata(fh, out_path, options != 0 ? options->quiet : 0);
@@ -1385,6 +1447,7 @@ static RazeStatus extract_file_entry(
     if (output != 0) {
         fclose(output);
     }
+    free(output_stream_buf);
     if (remove_output) {
         remove(out_path);
     }
@@ -1652,6 +1715,7 @@ RazeStatus raze_extract_store_archive(
     const RazeExtractOptions *options
 ) {
     FILE *file = 0;
+    unsigned char *archive_stream_buf = 0;
     RazeOverwritePrompt prompt;
     PendingDirMetaList pending_dirs;
     PendingSplitFile pending_split;
@@ -1718,6 +1782,7 @@ RazeStatus raze_extract_store_archive(
             status = RAZE_STATUS_IO;
             goto cleanup;
         }
+        (void)configure_stream_io_buffer(file, &archive_stream_buf);
 
         status = raze_rar5_read_signature(file);
         if (status != RAZE_STATUS_OK) {
@@ -1949,6 +2014,8 @@ RazeStatus raze_extract_store_archive(
 
         fclose(file);
         file = 0;
+        free(archive_stream_buf);
+        archive_stream_buf = 0;
     }
 
     if (!saw_main || !saw_end) {
@@ -1974,5 +2041,6 @@ cleanup:
     if (file != 0) {
         fclose(file);
     }
+    free(archive_stream_buf);
     return status;
 }
