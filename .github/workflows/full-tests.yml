@@ -15,7 +15,7 @@ concurrency:
 
 jobs:
   full-test-gate:
-    runs-on: self-hosted
+    runs-on: [self-hosted, linux, raze, rar]
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
@@ -32,3 +32,9 @@ jobs:
 
       - name: Full integration tests
         run: make USE_ISAL=0 test
+
+      - name: Cleanup workspace
+        if: always()
+        run: |
+          git clean -ffdx
+          git reset --hard
