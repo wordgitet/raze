@@ -16,6 +16,12 @@ typedef void (*RazeRar5FillRepeat2Fn)(
 	unsigned char b1
 );
 
+typedef void (*RazeRar5FillRepeat3Fn)(
+	unsigned char *dst,
+	size_t length,
+	const unsigned char p[3]
+);
+
 typedef void (*RazeRar5FillRepeat4Fn)(
 	unsigned char *dst,
 	size_t length,
@@ -25,6 +31,7 @@ typedef void (*RazeRar5FillRepeat4Fn)(
 typedef struct RazeRar5CopyKernels {
 	RazeRar5CopyOverlapFn copy_overlap;
 	RazeRar5FillRepeat2Fn fill_repeat2;
+	RazeRar5FillRepeat3Fn fill_repeat3;
 	RazeRar5FillRepeat4Fn fill_repeat4;
 } RazeRar5CopyKernels;
 

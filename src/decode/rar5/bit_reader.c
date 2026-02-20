@@ -49,6 +49,24 @@ void raze_rar5_br_init(
 	reader->bit_pos = 0;
 	reader->fast16_end = data_size >= 3U ? data_size - 3U : 0U;
 	reader->fast64_end = data_size >= 8U ? data_size - 8U : 0U;
+	reader->profile_enabled = 0;
+	reader->profile_fast16_hits = 0U;
+	reader->profile_fast16_misses = 0U;
+	reader->profile_fast64_hits = 0U;
+	reader->profile_fast64_misses = 0U;
+}
+
+void raze_rar5_br_set_profile(RazeRar5BitReader *reader, int enabled)
+{
+	if (reader == 0) {
+		return;
+	}
+
+	reader->profile_enabled = enabled != 0 ? 1 : 0;
+	reader->profile_fast16_hits = 0U;
+	reader->profile_fast16_misses = 0U;
+	reader->profile_fast64_hits = 0U;
+	reader->profile_fast64_misses = 0U;
 }
 
 size_t raze_rar5_br_bit_offset(const RazeRar5BitReader *reader) {
@@ -114,9 +132,15 @@ int raze_rar5_br_read_bits(
 		return 1;
 	}
 	if (raze_rar5_br_in_fast64(reader)) {
+		if (__builtin_expect(reader->profile_enabled, 0)) {
+			reader->profile_fast64_hits += 1U;
+		}
 		*value = raze_rar5_br_getbits64_fast_unchecked(reader, bits);
 		raze_rar5_br_addbits_fast_unchecked(reader, bits);
 		return 1;
+	}
+	if (__builtin_expect(reader->profile_enabled, 0)) {
+		reader->profile_fast64_misses += 1U;
 	}
 	if (reader->data == 0 || reader->bit_pos > 7U ||
 	    reader->byte_pos > reader->data_size) {
@@ -132,7 +156,7 @@ int raze_rar5_br_read_bits(
 	return raze_rar5_br_add_bits(reader, bits);
 }
 
-uint16_t raze_rar5_br_peek16(const RazeRar5BitReader *reader) {
+uint16_t raze_rar5_br_peek16(RazeRar5BitReader *reader) {
 	uint32_t bit_field;
 	unsigned int shift;
 	const unsigned char *p;
@@ -146,7 +170,13 @@ uint16_t raze_rar5_br_peek16(const RazeRar5BitReader *reader) {
 		return 0;
 	}
 	if (raze_rar5_br_in_fast16(reader)) {
+		if (__builtin_expect(reader->profile_enabled, 0)) {
+			reader->profile_fast16_hits += 1U;
+		}
 		return raze_rar5_br_peek16_fast_unchecked(reader);
+	}
+	if (__builtin_expect(reader->profile_enabled, 0)) {
+		reader->profile_fast16_misses += 1U;
 	}
 	avail = reader->data_size - reader->byte_pos;
 	if (avail == 0U) {

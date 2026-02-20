@@ -79,6 +79,35 @@ static void fill_repeat2_scalar(
 	}
 }
 
+static void fill_repeat3_scalar(
+	unsigned char *dst,
+	size_t length,
+	const unsigned char p[3]
+)
+{
+	size_t i;
+
+	while (length >= 12U) {
+		dst[0] = p[0];
+		dst[1] = p[1];
+		dst[2] = p[2];
+		dst[3] = p[0];
+		dst[4] = p[1];
+		dst[5] = p[2];
+		dst[6] = p[0];
+		dst[7] = p[1];
+		dst[8] = p[2];
+		dst[9] = p[0];
+		dst[10] = p[1];
+		dst[11] = p[2];
+		dst += 12U;
+		length -= 12U;
+	}
+	for (i = 0U; i < length; ++i) {
+		dst[i] = p[i % 3U];
+	}
+}
+
 static void fill_repeat4_scalar(
 	unsigned char *dst,
 	size_t length,
@@ -157,6 +186,15 @@ static RAZE_RAR5_TARGET_SSE2 void fill_repeat2_sse2(
 	}
 }
 
+static RAZE_RAR5_TARGET_SSE2 void fill_repeat3_sse2(
+	unsigned char *dst,
+	size_t length,
+	const unsigned char p[3]
+)
+{
+	fill_repeat3_scalar(dst, length, p);
+}
+
 static RAZE_RAR5_TARGET_SSE2 void fill_repeat4_sse2(
 	unsigned char *dst,
 	size_t length,
@@ -231,6 +269,15 @@ static RAZE_RAR5_TARGET_AVX2 void fill_repeat2_avx2(
 	}
 }
 
+static RAZE_RAR5_TARGET_AVX2 void fill_repeat3_avx2(
+	unsigned char *dst,
+	size_t length,
+	const unsigned char p[3]
+)
+{
+	fill_repeat3_sse2(dst, length, p);
+}
+
 static RAZE_RAR5_TARGET_AVX2 void fill_repeat4_avx2(
 	unsigned char *dst,
 	size_t length,
@@ -265,6 +312,7 @@ const RazeRar5CopyKernels *raze_rar5_copy_kernels_get(void)
 
 	kernels.copy_overlap = copy_overlap_scalar;
 	kernels.fill_repeat2 = fill_repeat2_scalar;
+	kernels.fill_repeat3 = fill_repeat3_scalar;
 	kernels.fill_repeat4 = fill_repeat4_scalar;
 
 #if RAZE_RAR5_HAVE_X86_INTRINSICS
@@ -273,10 +321,12 @@ const RazeRar5CopyKernels *raze_rar5_copy_kernels_get(void)
 		if (features->x86_avx2) {
 			kernels.copy_overlap = copy_overlap_avx2;
 			kernels.fill_repeat2 = fill_repeat2_avx2;
+			kernels.fill_repeat3 = fill_repeat3_avx2;
 			kernels.fill_repeat4 = fill_repeat4_avx2;
 		} else if (features->x86_sse2) {
 			kernels.copy_overlap = copy_overlap_sse2;
 			kernels.fill_repeat2 = fill_repeat2_sse2;
+			kernels.fill_repeat3 = fill_repeat3_sse2;
 			kernels.fill_repeat4 = fill_repeat4_sse2;
 		}
 	}

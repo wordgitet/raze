@@ -24,6 +24,11 @@ typedef struct RazeRar5BitReader {
 	unsigned int bit_pos;
 	size_t fast16_end;
 	size_t fast64_end;
+	int profile_enabled;
+	uint64_t profile_fast16_hits;
+	uint64_t profile_fast16_misses;
+	uint64_t profile_fast64_hits;
+	uint64_t profile_fast64_misses;
 } RazeRar5BitReader;
 
 void raze_rar5_br_init(
@@ -38,9 +43,10 @@ int raze_rar5_br_read_bits(
 	unsigned int bits,
 	uint64_t *value
 );
-uint16_t raze_rar5_br_peek16(const RazeRar5BitReader *reader);
+uint16_t raze_rar5_br_peek16(RazeRar5BitReader *reader);
 int raze_rar5_br_align_byte(RazeRar5BitReader *reader);
 size_t raze_rar5_br_bit_offset(const RazeRar5BitReader *reader);
+void raze_rar5_br_set_profile(RazeRar5BitReader *reader, int enabled);
 
 static RAZE_RAR5_BR_FORCE_INLINE int raze_rar5_br_in_fast16(
 	const RazeRar5BitReader *reader
@@ -101,7 +107,7 @@ static RAZE_RAR5_BR_FORCE_INLINE uint16_t raze_rar5_br_peek16_fast_unchecked(
 }
 
 static RAZE_RAR5_BR_FORCE_INLINE uint32_t raze_rar5_br_getbits32_fast_unchecked(
-	const RazeRar5BitReader *reader,
+	RazeRar5BitReader *reader,
 	unsigned int bits
 )
 {
@@ -117,7 +123,7 @@ static RAZE_RAR5_BR_FORCE_INLINE uint32_t raze_rar5_br_getbits32_fast_unchecked(
 }
 
 static RAZE_RAR5_BR_FORCE_INLINE uint64_t raze_rar5_br_getbits64_fast_unchecked(
-	const RazeRar5BitReader *reader,
+	RazeRar5BitReader *reader,
 	unsigned int bits
 )
 {

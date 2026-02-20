@@ -44,11 +44,13 @@ static inline int raze_rar5_decode_number(
 	quick_bits = dec->quick_bits;
 
 	if (__builtin_expect(raze_rar5_br_in_fast16(reader), 1)) {
+		if (__builtin_expect(reader->profile_enabled, 0)) {
+			reader->profile_fast16_hits += 1U;
+		}
 		bit_field = (uint32_t)(raze_rar5_br_peek16_fast_unchecked(reader) &
 				       0xfffeU);
 		if (__builtin_expect(bit_field < dec->decode_len[quick_bits], 1)) {
 			uint32_t code = bit_field >> (16U - quick_bits);
-
 			raze_rar5_br_addbits_fast_unchecked(reader,
 							    dec->quick_len[code]);
 			*number = dec->quick_num[code];

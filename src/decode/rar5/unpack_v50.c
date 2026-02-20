@@ -1,6 +1,7 @@
 #include "unpack_v50.h"
 
 #include <limits.h>
+#include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -41,6 +42,140 @@ typedef struct RazeRar5SlotTables {
 	size_t dist_base[RAZE_RAR5_DIST_SLOT_MAX];
 	unsigned char dist_bits[RAZE_RAR5_DIST_SLOT_MAX];
 } RazeRar5SlotTables;
+
+typedef struct RazeRar5UnpackProfileStats {
+	uint64_t literal_syms;
+	uint64_t match_new_syms;
+	uint64_t match_repeat_syms;
+	uint64_t filter_syms;
+	uint64_t dist_1;
+	uint64_t dist_2;
+	uint64_t dist_3;
+	uint64_t dist_4;
+	uint64_t dist_5_16;
+	uint64_t dist_gt_16;
+	uint64_t table_reloads;
+} RazeRar5UnpackProfileStats;
+
+static int unpack_profile_enabled(void)
+{
+	const char *value = getenv("RAZE_PROFILE_UNPACK");
+
+	if (value == 0 || value[0] == '\0') {
+		return 0;
+	}
+	if (strcmp(value, "0") == 0) {
+		return 0;
+	}
+	return 1;
+}
+
+static void unpack_profile_note_distance(
+	RazeRar5UnpackProfileStats *stats,
+	size_t distance
+)
+{
+	if (stats == 0 || distance == 0U) {
+		return;
+	}
+
+	if (distance == 1U) {
+		stats->dist_1 += 1U;
+		return;
+	}
+	if (distance == 2U) {
+		stats->dist_2 += 1U;
+		return;
+	}
+	if (distance == 3U) {
+		stats->dist_3 += 1U;
+		return;
+	}
+	if (distance == 4U) {
+		stats->dist_4 += 1U;
+		return;
+	}
+	if (distance <= 16U) {
+		stats->dist_5_16 += 1U;
+		return;
+	}
+	stats->dist_gt_16 += 1U;
+}
+
+static const char *status_to_name(RazeStatus status)
+{
+	switch (status) {
+	case RAZE_STATUS_OK:
+		return "ok";
+	case RAZE_STATUS_ERROR:
+		return "error";
+	case RAZE_STATUS_BAD_ARGUMENT:
+		return "bad_argument";
+	case RAZE_STATUS_UNSUPPORTED:
+		return "unsupported";
+	case RAZE_STATUS_UNSUPPORTED_FEATURE:
+		return "unsupported_feature";
+	case RAZE_STATUS_BAD_ARCHIVE:
+		return "bad_archive";
+	case RAZE_STATUS_PATH_VIOLATION:
+		return "path_violation";
+	case RAZE_STATUS_CRC_MISMATCH:
+		return "crc_mismatch";
+	case RAZE_STATUS_EXISTS:
+		return "exists";
+	case RAZE_STATUS_IO:
+		return "io";
+	case RAZE_STATUS_ABORTED:
+		return "aborted";
+	default:
+		return "unknown";
+	}
+}
+
+static void unpack_profile_report(
+	const RazeRar5UnpackProfileStats *stats,
+	const RazeRar5BitReader *reader,
+	size_t packed_size,
+	size_t output_size,
+	RazeStatus status
+)
+{
+	uint64_t fast16_total;
+	uint64_t fast64_total;
+
+	if (stats == 0 || reader == 0 || !reader->profile_enabled) {
+		return;
+	}
+
+	fast16_total = reader->profile_fast16_hits + reader->profile_fast16_misses;
+	fast64_total = reader->profile_fast64_hits + reader->profile_fast64_misses;
+
+	fprintf(
+		stderr,
+		"[unpack-prof] packed=%zu output=%zu status=%s "
+		"literals=%llu match_new=%llu match_repeat=%llu filters=%llu "
+		"dist(1/2/3/4/5-16/>16)=(%llu/%llu/%llu/%llu/%llu/%llu) "
+		"tables=%llu fast16=%llu/%llu fast64=%llu/%llu\n",
+		packed_size,
+		output_size,
+		status_to_name(status),
+		(unsigned long long)stats->literal_syms,
+		(unsigned long long)stats->match_new_syms,
+		(unsigned long long)stats->match_repeat_syms,
+		(unsigned long long)stats->filter_syms,
+		(unsigned long long)stats->dist_1,
+		(unsigned long long)stats->dist_2,
+		(unsigned long long)stats->dist_3,
+		(unsigned long long)stats->dist_4,
+		(unsigned long long)stats->dist_5_16,
+		(unsigned long long)stats->dist_gt_16,
+		(unsigned long long)stats->table_reloads,
+		(unsigned long long)reader->profile_fast16_hits,
+		(unsigned long long)fast16_total,
+		(unsigned long long)reader->profile_fast64_hits,
+		(unsigned long long)fast64_total
+	);
+}
 
 static const RazeRar5SlotTables *raze_rar5_slot_tables_get(void)
 {
@@ -101,6 +236,9 @@ static RAZE_RAR5_FORCE_INLINE int read_bits_u32(
 		return 1;
 	}
 	if (bits <= 32U && raze_rar5_br_in_fast64(reader)) {
+		if (__builtin_expect(reader->profile_enabled, 0)) {
+			reader->profile_fast64_hits += 1U;
+		}
 		*value = raze_rar5_br_getbits32_fast_unchecked(reader, bits);
 		raze_rar5_br_addbits_fast_unchecked(reader, bits);
 		return 1;
@@ -548,6 +686,16 @@ static inline void copy_match_to_output_no_history(
 		*out_pos = out + length;
 		return;
 	}
+	if (distance == 3U) {
+		unsigned char p[3];
+
+		p[0] = output[out - 3U];
+		p[1] = output[out - 2U];
+		p[2] = output[out - 1U];
+		kernels->fill_repeat3(output + out, length, p);
+		*out_pos = out + length;
+		return;
+	}
 	if (distance == 4U) {
 		unsigned char p[4];
 
@@ -626,6 +774,16 @@ static int copy_match_to_output(
 
 	if (distance <= out) {
 		unsigned char *dst = output + out;
+		if (distance == 3U) {
+			unsigned char p[3];
+
+			p[0] = output[out - 3U];
+			p[1] = output[out - 2U];
+			p[2] = output[out - 1U];
+			kernels->fill_repeat3(dst, length, p);
+			*out_pos = out + length;
+			return 1;
+		}
 		kernels->copy_overlap(dst, length, distance);
 		*out_pos = out + length;
 		return 1;
@@ -760,13 +918,17 @@ RazeStatus raze_rar5_unpack_ctx_decode_file(
 	int unsupported_filter = 0;
 	const RazeRar5SlotTables *slot_tables;
 	const RazeRar5CopyKernels *copy_kernels;
+	RazeRar5UnpackProfileStats profile_stats;
 	RazeStatus status = RAZE_STATUS_OK;
+	int profile_enabled;
 
 	if (ctx == 0 || packed == 0 || output == 0) {
 		return RAZE_STATUS_BAD_ARGUMENT;
 	}
 	slot_tables = raze_rar5_slot_tables_get();
 	copy_kernels = raze_rar5_copy_kernels_get();
+	memset(&profile_stats, 0, sizeof(profile_stats));
+	profile_enabled = unpack_profile_enabled();
 
 	if (!solid) {
 		raze_rar5_unpack_ctx_reset_for_new_stream(ctx);
@@ -811,9 +973,13 @@ RazeStatus raze_rar5_unpack_ctx_decode_file(
 
 	raze_rar5_filter_queue_init(&filter_queue);
 	raze_rar5_br_init(&reader, packed, packed_size);
+	raze_rar5_br_set_profile(&reader, profile_enabled);
 	if (!read_block_header(&reader, &block)) {
 		status = RAZE_STATUS_BAD_ARCHIVE;
 		goto done;
+	}
+	if (profile_enabled && block.table_present) {
+		profile_stats.table_reloads += 1U;
 	}
 	if (!read_tables(&reader, &block, ctx, extra_dist)) {
 		status = RAZE_STATUS_BAD_ARCHIVE;
@@ -830,6 +996,9 @@ RazeStatus raze_rar5_unpack_ctx_decode_file(
 			if (!read_block_header(&reader, &block)) {
 				status = RAZE_STATUS_BAD_ARCHIVE;
 				goto done;
+			}
+			if (profile_enabled && block.table_present) {
+				profile_stats.table_reloads += 1U;
 			}
 			if (!read_tables(&reader, &block, ctx, extra_dist)) {
 				status = RAZE_STATUS_BAD_ARCHIVE;
@@ -851,10 +1020,13 @@ RazeStatus raze_rar5_unpack_ctx_decode_file(
 				goto done;
 			}
 
-				if (main_slot < 256U) {
-					output[out_pos++] = (unsigned char)main_slot;
-					continue;
+			if (main_slot < 256U) {
+				if (__builtin_expect(profile_enabled, 0)) {
+					profile_stats.literal_syms += 1U;
 				}
+				output[out_pos++] = (unsigned char)main_slot;
+				continue;
+			}
 
 			if (main_slot >= 262U) {
 				int ok;
@@ -925,6 +1097,10 @@ RazeStatus raze_rar5_unpack_ctx_decode_file(
 
 				insert_old_dist(ctx->old_dist, distance);
 				ctx->last_length = length;
+				if (__builtin_expect(profile_enabled, 0)) {
+					profile_stats.match_new_syms += 1U;
+					unpack_profile_note_distance(&profile_stats, distance);
+				}
 				if (length > output_size - out_pos) {
 					status = RAZE_STATUS_BAD_ARCHIVE;
 					goto done;
@@ -954,6 +1130,9 @@ RazeStatus raze_rar5_unpack_ctx_decode_file(
 
 			if (main_slot == 256U) {
 				size_t file_pos = out_pos;
+				if (__builtin_expect(profile_enabled, 0)) {
+					profile_stats.filter_syms += 1U;
+				}
 				if (!read_filter(&reader, file_pos, &filter_queue)) {
 					status = RAZE_STATUS_BAD_ARCHIVE;
 					goto done;
@@ -963,6 +1142,13 @@ RazeStatus raze_rar5_unpack_ctx_decode_file(
 
 			if (main_slot == 257U) {
 				if (ctx->last_length != 0U) {
+					if (__builtin_expect(profile_enabled, 0)) {
+						profile_stats.match_repeat_syms += 1U;
+						unpack_profile_note_distance(
+							&profile_stats,
+							ctx->old_dist[0]
+						);
+					}
 					if (ctx->last_length > output_size - out_pos) {
 						status = RAZE_STATUS_BAD_ARCHIVE;
 						goto done;
@@ -1015,6 +1201,10 @@ RazeStatus raze_rar5_unpack_ctx_decode_file(
 				}
 
 				ctx->last_length = length;
+				if (__builtin_expect(profile_enabled, 0)) {
+					profile_stats.match_repeat_syms += 1U;
+					unpack_profile_note_distance(&profile_stats, distance);
+				}
 				if (length > output_size - out_pos) {
 					status = RAZE_STATUS_BAD_ARCHIVE;
 					goto done;
@@ -1085,6 +1275,13 @@ RazeStatus raze_rar5_unpack_ctx_decode_file(
 	}
 
 done:
+	unpack_profile_report(
+		&profile_stats,
+		&reader,
+		packed_size,
+		output_size,
+		status
+	);
 	raze_rar5_filter_queue_free(&filter_queue);
 	if (status != RAZE_STATUS_OK) {
 		raze_rar5_unpack_ctx_reset_for_new_stream(ctx);

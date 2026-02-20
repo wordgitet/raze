@@ -66,11 +66,12 @@ void raze_rar5_make_decode_tables(
 	case RAZE_RAR5_NC:
 	case RAZE_RAR5_NC20:
 	case RAZE_RAR5_NC30:
-		dec->quick_bits = RAZE_RAR5_MAX_QUICK_DECODE_BITS;
+		dec->quick_bits = RAZE_RAR5_MAX_QUICK_DECODE_BITS >= 10U ? 10U :
+			RAZE_RAR5_MAX_QUICK_DECODE_BITS;
 		break;
 	default:
-		dec->quick_bits = RAZE_RAR5_MAX_QUICK_DECODE_BITS > 3U ?
-			RAZE_RAR5_MAX_QUICK_DECODE_BITS - 3U : 0U;
+		dec->quick_bits = RAZE_RAR5_MAX_QUICK_DECODE_BITS >= 7U ? 7U :
+			RAZE_RAR5_MAX_QUICK_DECODE_BITS;
 		break;
 	}
 
