@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 RUNS="${RUNS:-7}"
-UNRAR_BIN="${UNRAR_BIN:-$(command -v unrar || true)}"
+UNRAR_BIN="${UNRAR_BIN:-$("$ROOT_DIR"/scripts/find_unrar.sh || true)}"
 UNRAR_THREADS="${UNRAR_THREADS:-1}"
 PASSWORD="${PASSWORD:-secret}"
 TARGET_GAP_PCT="${TARGET_GAP_PCT:-10}"

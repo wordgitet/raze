@@ -5,7 +5,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ARCHIVE="${1:-$ROOT_DIR/corpus/local/archives/local_store.rar}"
 SOURCE_DIR="${SOURCE_DIR:-$ROOT_DIR/corpus/local/source}"
 RUNS="${RUNS:-7}"
-UNRAR_BIN="${UNRAR_BIN:-$(command -v unrar || true)}"
+UNRAR_BIN="${UNRAR_BIN:-$("$ROOT_DIR"/scripts/find_unrar.sh || true)}"
 UNRAR_THREADS="${UNRAR_THREADS:-1}"
 
 log() {
