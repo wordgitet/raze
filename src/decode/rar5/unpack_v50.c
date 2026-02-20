@@ -467,7 +467,6 @@ static void copy_from_output_with_overlap(unsigned char *dst, size_t length, siz
 static int copy_match_to_output(
 	RazeRar5UnpackCtx *ctx,
 	unsigned char *output,
-	size_t output_size,
 	size_t *out_pos,
 	size_t dict_size,
 	size_t length,
@@ -477,18 +476,32 @@ static int copy_match_to_output(
 	size_t history_filled;
 	size_t out;
 
-	if (ctx == 0 || output == 0 || out_pos == 0) {
-		return 0;
-	}
-	if (*out_pos > output_size || length > output_size - *out_pos) {
-		return 0;
-	}
 	if (length == 0U) {
 		return 1;
 	}
 
 	out = *out_pos;
 	history_filled = ctx->dict_filled;
+
+	/*
+	 * Non-solid and first-solid-file decode keeps all valid history in
+	 * already-produced output bytes, so skip dict-history branches.
+	 */
+	if (history_filled == 0U) {
+		if (distance == 0U || distance > out) {
+			memset(output + out, 0, length);
+			*out_pos = out + length;
+			return 1;
+		}
+		if (distance == 1U) {
+			memset(output + out, output[out - 1U], length);
+			*out_pos = out + length;
+			return 1;
+		}
+		copy_from_output_with_overlap(output + out, length, distance);
+		*out_pos = out + length;
+		return 1;
+	}
 
 	if (distance == 0U || distance > history_filled + out) {
 		/*
@@ -683,7 +696,8 @@ RazeStatus raze_rar5_unpack_ctx_decode_file(
 		raze_rar5_unpack_ctx_reset_for_new_stream(ctx);
 		return RAZE_STATUS_BAD_ARCHIVE;
 	}
-	if (!ensure_dict_capacity(ctx, dict_size)) {
+	if (solid && ctx->dict_filled > 0U &&
+	    !ensure_dict_capacity(ctx, dict_size)) {
 		raze_rar5_unpack_ctx_reset_for_new_stream(ctx);
 		return RAZE_STATUS_IO;
 	}
@@ -736,10 +750,6 @@ RazeStatus raze_rar5_unpack_ctx_decode_file(
 			}
 
 				if (main_slot < 256U) {
-					if (out_pos >= output_size) {
-						status = RAZE_STATUS_BAD_ARCHIVE;
-						goto done;
-					}
 					output[out_pos++] = (unsigned char)main_slot;
 					continue;
 				}
@@ -809,10 +819,13 @@ RazeStatus raze_rar5_unpack_ctx_decode_file(
 
 				insert_old_dist(ctx->old_dist, distance);
 				ctx->last_length = length;
+				if (length > output_size - out_pos) {
+					status = RAZE_STATUS_BAD_ARCHIVE;
+					goto done;
+				}
 				if (!copy_match_to_output(
 						ctx,
 						output,
-						output_size,
 						&out_pos,
 						dict_size,
 						length,
@@ -835,10 +848,13 @@ RazeStatus raze_rar5_unpack_ctx_decode_file(
 
 			if (main_slot == 257U) {
 				if (ctx->last_length != 0U) {
+					if (ctx->last_length > output_size - out_pos) {
+						status = RAZE_STATUS_BAD_ARCHIVE;
+						goto done;
+					}
 					if (!copy_match_to_output(
 							ctx,
 							output,
-							output_size,
 							&out_pos,
 							dict_size,
 							ctx->last_length,
@@ -875,10 +891,13 @@ RazeStatus raze_rar5_unpack_ctx_decode_file(
 				}
 
 				ctx->last_length = length;
+				if (length > output_size - out_pos) {
+					status = RAZE_STATUS_BAD_ARCHIVE;
+					goto done;
+				}
 				if (!copy_match_to_output(
 						ctx,
 						output,
-						output_size,
 						&out_pos,
 						dict_size,
 						length,
@@ -900,9 +919,12 @@ RazeStatus raze_rar5_unpack_ctx_decode_file(
 		status = RAZE_STATUS_BAD_ARCHIVE;
 		goto done;
 	}
-	if (solid && !append_output_to_dict(ctx, dict_size, output, output_size)) {
-		status = RAZE_STATUS_IO;
-		goto done;
+	if (solid) {
+		if (!ensure_dict_capacity(ctx, dict_size) ||
+		    !append_output_to_dict(ctx, dict_size, output, output_size)) {
+			status = RAZE_STATUS_IO;
+			goto done;
+		}
 	}
 	if (filter_queue.count != 0U &&
 	    !raze_rar5_apply_filters(
