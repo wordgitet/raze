@@ -16,6 +16,7 @@ and strong correctness guarantees.
 
 - `Alpha`: feature-complete for intended RAR5 scope, still changing.
 - `Beta`: behavior/API/CLI mostly stable, broad validation in progress.
+- `RC` (Release Candidate): feature-frozen for stable scope, only blockers.
 - `Stable`: documented, reproducible, and ready for wider adoption.
 
 ## Alpha (Current) Checklist
@@ -171,9 +172,50 @@ and strong correctness guarantees.
 - [ ] Supported platform matrix passes release CI on every stable candidate.
 - [ ] Project ready for broad external consumption.
 
+## RC (Pre-Release) Checklist
+
+### RC Entry Gate
+
+- [ ] Beta exit criteria satisfied for the supported RAR5 scope.
+- [ ] Required cloud CI (`build-and-test`) and self-hosted full-tests
+      (`full-test-gate`) both green on latest `master`.
+- [ ] No open high-severity correctness/security issues in release scope.
+
+### Freeze Policy
+
+- [ ] Feature freeze enabled for stable scope (`x/e/l/lt/t/p` + documented
+      switches): no new features after RC cut.
+- [ ] Only blocker fixes are accepted during RC window.
+- [ ] Every blocker fix adds or updates a regression test.
+- [ ] No behavior-changing refactors without explicit RC exception.
+
+### Release Candidate Validation
+
+- [ ] Run full local gate on release branch:
+      `make ci-local CI_LOCAL_EXPANDED=1 RUN_SECS=30`.
+- [ ] Run cloud fast CI and self-hosted full-tests on release branch.
+- [ ] Re-run benchmark suite and compare against recorded baseline.
+- [ ] Verify docs/release notes match shipped behavior and limits.
+- [ ] Validate install/build/test instructions from clean checkout.
+
+### RC Deliverables
+
+- [ ] Publish `rc` changelog with known issues and deferred items.
+- [ ] Publish `docs/beta_readiness_report.md` update for RC status.
+- [ ] Tag release candidate (`vX.Y.Z-rcN`) with signed tag and notes.
+
+### RC Exit Criteria (Go/No-Go to Stable)
+
+- [ ] Zero open release-blocker issues.
+- [ ] CI stability confirmed over repeated runs (cloud + self-hosted).
+- [ ] No high-severity regressions vs baseline performance/correctness.
+- [ ] Final stable tag plan approved and checklist complete.
+
 ## Current Focus (Near-Term)
 
 1. Validate new `x/e/l/lt/t/p` command surface on macOS once hardware/runner
    is available; keep Windows regression coverage in MSYS2.
 2. Expand external corpus coverage from optional/manual to a tracked profile.
 3. Add long-running fuzz execution cadence and bug triage tracking routine.
+4. Keep legacy RAR4-and-below support scoped for post-beta/RC planning
+   (separate milestone after stable RAR5 release candidate quality gates).
