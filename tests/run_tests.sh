@@ -12,7 +12,7 @@ ARCHIVE_THEMATIC_FAST="$ROOT_DIR/corpus/local/thematic/archives/thematic_fast.ra
 ARCHIVE_THEMATIC_SOLID="$ROOT_DIR/corpus/local/thematic/archives/thematic_best_solid.rar"
 SOURCE_DIR="$ROOT_DIR/corpus/local/source"
 THEMATIC_SOURCE_DIR="$ROOT_DIR/corpus/local/thematic/source"
-RAR_BIN="${RAR_BIN:-$(command -v rar || true)}"
+RAR_BIN="${RAR_BIN:-$("$ROOT_DIR"/scripts/find_rar.sh || true)}"
 
 log() {
     printf '[test] %s\n' "$*"

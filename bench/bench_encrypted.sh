@@ -5,7 +5,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 RUNS="${RUNS:-7}"
 UNRAR_BIN="${UNRAR_BIN:-$(command -v unrar || true)}"
 UNRAR_THREADS="${UNRAR_THREADS:-1}"
-RAR_BIN="${RAR_BIN:-$(command -v rar || true)}"
+RAR_BIN="${RAR_BIN:-$("$ROOT_DIR"/scripts/find_rar.sh || true)}"
 PASSWORD="${PASSWORD:-secret}"
 
 log() {

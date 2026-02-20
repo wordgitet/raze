@@ -21,7 +21,7 @@ die() {
     exit 1
 }
 
-RAR_BIN="${RAR_BIN:-$(command -v rar || true)}"
+RAR_BIN="${RAR_BIN:-$("$ROOT_DIR"/scripts/find_rar.sh || true)}"
 if [[ -z "$RAR_BIN" ]]; then
     die "rar binary not found. Set RAR_BIN or install rar."
 fi
